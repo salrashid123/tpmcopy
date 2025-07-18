@@ -1,4 +1,4 @@
-## tpmcopy:  Securely transfer an RSA|ECC|AES|HMAC key to a Trusted Platform Module (TPM)
+## tpmcopy:  Securely transfer an RSA|ECC|AES|HMAC key to a remote Trusted Platform Module (TPM)
 
 Utility function you can use to securely copy an `RSA` or `ECC` or `AES` or `HMAC`  **KEY** from your laptop to a remote `Trusted Platform MOdule (TPM)`
 
