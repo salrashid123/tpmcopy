@@ -78,7 +78,7 @@ Note that step 3 is constructed with `PolicyDuplicateSelect` which ensures the k
 You can use the binary in the [Releases](https://github.com/salrashid123/tpmcopy/releases) page as a standalone cli or load as a library or just build: 
 
 ```bash
-go build -o tpm2copy cmd/main.go
+go build -o tpmcopy cmd/main.go
 ```
 
 ## Usage
@@ -108,7 +108,7 @@ Extract `Endorsement Public Key`
 ```bash
 export TPMB="/dev/tpmrm0"
 
-tpm2copy  --mode publickey --keyType=rsa -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+tpmcopy  --mode publickey --keyType=rsa -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
 ```
 
 Alternatively, you can use `tpm2_tools`:
@@ -132,7 +132,7 @@ load and duplicate the external key and bind it to a password
 ### you can use a  TPM simulator or a real tpm to load the external key
 export TPMA="/dev/tpmrm0"
 
-tpm2copy --mode duplicate  --secret=/tmp/key_rsa.pem  --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
+tpmcopy --mode duplicate  --secret=/tmp/key_rsa.pem  --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 ```
 
 copy `/tmp/out.json` to `TPM-B`
@@ -142,7 +142,7 @@ copy `/tmp/out.json` to `TPM-B`
 import the key
 
 ```bash
-tpm2copy --mode import --password=bar --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
+tpmcopy --mode import --password=bar --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
 ```
 
 5) Use key
@@ -165,7 +165,7 @@ Create the ekPub and ensure the PCR value is set
 
 ### first make sure the target TPM has the correct PCR to bind against
 export TPMA="/dev/tpmrm0"
-tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
+tpmcopy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 
 $ tpm2_flushcontext -t &&  tpm2_flushcontext -s  &&  tpm2_flushcontext -l
 
@@ -186,7 +186,7 @@ copy `public.pem` to `TPM-A`
 ```bash
 ### you can use a  TPM simulator or a real tpm to load the external key
 export TPMA="/dev/tpmrm0"
-tpm2copy --mode duplicate --keyType=rsa \
+tpmcopy --mode duplicate --keyType=rsa \
    --secret=/tmp/key_rsa.pem  --pcrValues=23:f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b \
    -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 ```
@@ -196,7 +196,7 @@ copy `/tmp/out.json` to `TPM-B`
 3) `TPM-B`
 
 ```bash
-tpm2copy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
+tpmcopy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
 ```
 
 4) Test signature
@@ -219,19 +219,19 @@ openssl genpkey -algorithm ec -pkeyopt  ec_paramgen_curve:P-256  -out /tmp/key_e
 
 ### TPM-B
 export TPMB="/dev/tpmrm0"
-tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
+tpmcopy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 ###  copy  to TPM-A
 
 ### TPM-A
 ## Password
 export TPMA="/dev/tpmrm0"
-tpm2copy --mode duplicate --keyType=ecc --secret=/tmp/key_ecc.pem \
+tpmcopy --mode duplicate --keyType=ecc --secret=/tmp/key_ecc.pem \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 
 ###  copy /tmp/out.json to TPM-B
 
 ### TPM-B
-tpm2copy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
+tpmcopy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 
 ### test
 go run ecc/password/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB --password=bar
@@ -248,18 +248,18 @@ echo -n $secret > /tmp/aes.key
 
 ### TPM-B
 export TPMB="/dev/tpmrm0"
-tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
+tpmcopy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 ###  copy  to TPM-A
 
 ### TPM-A
 export TPMA="/dev/tpmrm0"
-tpm2copy --mode duplicate --keyType=aes --secret=/tmp/aes.key \
+tpmcopy --mode duplicate --keyType=aes --secret=/tmp/aes.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 
 ###  copy /tmp/out.json to TPM-B
 
 ### TPM-B
-tpm2copy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
+tpmcopy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 
 ### test
 go run aes/password/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB --password=bar
@@ -279,18 +279,18 @@ echo $hexkey
 
 ### TPM-B
 export TPMB="/dev/tpmrm0"
-tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
+tpmcopy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 ###  copy  to TPM-A
 
 ### TPM-A
 export TPMA="/dev/tpmrm0"
-tpm2copy --mode duplicate --keyType=hmac --secret=/tmp/hmac.key \
+tpmcopy --mode duplicate --keyType=hmac --secret=/tmp/hmac.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 
 ###  copy /tmp/out.json to TPM-B
 
 ### TPM-B
-tpm2copy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
+tpmcopy --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 
 ### test
 go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB --password=bar
