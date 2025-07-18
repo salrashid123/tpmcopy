@@ -220,7 +220,7 @@ func (x *PCRS) GetValue() []byte {
 type Key struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	EkPub         []byte                 `protobuf:"bytes,2,opt,name=ekPub,proto3" json:"ekPub,omitempty"`
+	ParentName    string                 `protobuf:"bytes,2,opt,name=parentName,proto3" json:"parentName,omitempty"`
 	DupPub        []byte                 `protobuf:"bytes,3,opt,name=dupPub,proto3" json:"dupPub,omitempty"`
 	DupDup        []byte                 `protobuf:"bytes,4,opt,name=dupDup,proto3" json:"dupDup,omitempty"`
 	DupSeed       []byte                 `protobuf:"bytes,5,opt,name=dupSeed,proto3" json:"dupSeed,omitempty"`
@@ -265,11 +265,11 @@ func (x *Key) GetName() string {
 	return ""
 }
 
-func (x *Key) GetEkPub() []byte {
+func (x *Key) GetParentName() string {
 	if x != nil {
-		return x.EkPub
+		return x.ParentName
 	}
-	return nil
+	return ""
 }
 
 func (x *Key) GetDupPub() []byte {
@@ -313,10 +313,12 @@ const file_duplicatepb_wrap_proto_rawDesc = "" +
 	"\x03AES\x10\x03\".\n" +
 	"\x04PCRS\x12\x10\n" +
 	"\x03pcr\x18\x01 \x01(\x05R\x03pcr\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"y\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"\x83\x01\n" +
 	"\x03Key\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05ekPub\x18\x02 \x01(\fR\x05ekPub\x12\x16\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1e\n" +
+	"\n" +
+	"parentName\x18\x02 \x01(\tR\n" +
+	"parentName\x12\x16\n" +
 	"\x06dupPub\x18\x03 \x01(\fR\x06dupPub\x12\x16\n" +
 	"\x06dupDup\x18\x04 \x01(\fR\x06dupDup\x12\x18\n" +
 	"\adupSeed\x18\x05 \x01(\fR\adupSeedB3Z1github.com/salrashid123/go-tpm-wrapping/tpmwrappbb\x06proto3"

@@ -2,7 +2,6 @@ package tpmcopy
 
 import (
 	"crypto/ecdsa"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
@@ -112,7 +111,7 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 }
 
 // create a duplicate of the given key type and template
-func Duplicate(h *TPMConfig, encryptingPublicKey []byte, keyType duplicatepb.Secret_KeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
+func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
 
 	if h.SessionEncryptionHandle == 0 {
 		return duplicatepb.Secret{}, fmt.Errorf("error please specify a sessionEncryptionHandle")
@@ -148,51 +147,9 @@ func Duplicate(h *TPMConfig, encryptingPublicKey []byte, keyType duplicatepb.Sec
 	}()
 	// parameter encryption
 
-	var ekPububFromPEMTemplate tpm2.TPMTPublic
-
-	block, _ := pem.Decode(encryptingPublicKey)
-	parsedKey, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return duplicatepb.Secret{}, fmt.Errorf(" error parsing encrypting public key : %v", err)
-	}
-
-	switch pub := parsedKey.(type) {
-	case *rsa.PublicKey:
-		rsaPub, ok := parsedKey.(*rsa.PublicKey)
-		if !ok {
-			return duplicatepb.Secret{}, fmt.Errorf(" error converting encryptingPublicKey to rsa")
-		}
-		ekPububFromPEMTemplate = tpm2.RSAEKTemplate
-		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
-			tpm2.TPMAlgRSA,
-			&tpm2.TPM2BPublicKeyRSA{
-				Buffer: rsaPub.N.Bytes(),
-			},
-		)
-	case *ecdsa.PublicKey:
-		ecPub, ok := parsedKey.(*ecdsa.PublicKey)
-		if !ok {
-			return duplicatepb.Secret{}, fmt.Errorf(" error converting encryptingPublicKey to ecdsa")
-		}
-		ekPububFromPEMTemplate = tpm2.ECCEKTemplate
-		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
-			tpm2.TPMAlgECC,
-			&tpm2.TPMSECCPoint{
-				X: tpm2.TPM2BECCParameter{
-					Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
-				},
-				Y: tpm2.TPM2BECCParameter{
-					Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
-				},
-			},
-		)
-	default:
-		return duplicatepb.Secret{}, fmt.Errorf("unsupported public key type %v", pub)
-	}
-
 	ekName, err := tpm2.ObjectName(&ekPububFromPEMTemplate)
 	if err != nil {
-		return duplicatepb.Secret{}, fmt.Errorf("failed to get name key: %v", err)
+		return duplicatepb.Secret{}, fmt.Errorf(" failed to get name key: %v", err)
 	}
 
 	// create a generic local primary key
@@ -570,7 +527,7 @@ func Duplicate(h *TPMConfig, encryptingPublicKey []byte, keyType duplicatepb.Sec
 			Symmetric: tpm2.TPMTSymDef{
 				Algorithm: tpm2.TPMAlgNull,
 			},
-		}.Execute(rwr) // no need to set rsessInOut since the session is encrypted
+		}.Execute(rwr, sess) // no need to set rsessInOut since the session is encrypted
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("duplicateResp can't crate duplicate %v", err)
 		}
@@ -592,10 +549,10 @@ func Duplicate(h *TPMConfig, encryptingPublicKey []byte, keyType duplicatepb.Sec
 		Type:     keyType,
 		UserAuth: userAuth,
 		Key: &duplicatepb.Key{
-			EkPub:   encryptingPublicKey,
-			DupPub:  dupPub,
-			DupSeed: dupSeed,
-			DupDup:  dupDup,
+			ParentName: hex.EncodeToString(ekName.Buffer),
+			DupPub:     dupPub,
+			DupSeed:    dupSeed,
+			DupDup:     dupDup,
 		},
 		Pcrs: pcv,
 	}, nil
@@ -646,79 +603,8 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret, pass
 		return keyfile.TPMKey{}, fmt.Errorf("error reading  handle public %v", err)
 	}
 
-	pub, err := ekPub.OutPublic.Contents()
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("can't read public object  %v", err)
-	}
-
-	// check if the key is either rsa or ecc
-
-	isRSA := true
-	_, err = pub.Parameters.RSADetail()
-	if err != nil {
-		_, err = pub.Parameters.ECCDetail()
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("provided handle must be either an RSA or ECC key: %v", err)
-		}
-		isRSA = false
-	}
-
-	var b []byte
-	if isRSA {
-		rsaDetail, err := pub.Parameters.RSADetail()
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("can't read RSA details %v", err)
-		}
-		rsaUnique, err := pub.Unique.RSA()
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("can't read RSA public unique: %v", err)
-		}
-
-		pubKey, err := tpm2.RSAPub(rsaDetail, rsaUnique)
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("can't read RSA rsapub unique: %v", err)
-		}
-
-		b, err = x509.MarshalPKIXPublicKey(pubKey)
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("unable to convert RSA  PublicKey: %v", err)
-		}
-	} else {
-		ecDetail, err := pub.Parameters.ECCDetail()
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("ailed to get rsa public: %v", err)
-		}
-		crv, err := ecDetail.CurveID.Curve()
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("failed to get rsa public: %v", err)
-		}
-
-		eccUnique, err := pub.Unique.ECC()
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("failed to get ecc public key: %v", err)
-		}
-
-		pubKey := &ecdsa.PublicKey{
-			Curve: crv,
-			X:     big.NewInt(0).SetBytes(eccUnique.X.Buffer),
-			Y:     big.NewInt(0).SetBytes(eccUnique.Y.Buffer),
-		}
-		b, err = x509.MarshalPKIXPublicKey(pubKey)
-		if err != nil {
-			return keyfile.TPMKey{}, fmt.Errorf("unable to convert ECC PublicKey: %v", err)
-		}
-	}
-
-	encryptingPublicKey := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "PUBLIC KEY",
-			Bytes: b,
-		},
-	)
-	// load the secret
-
-	if hex.EncodeToString(secret.Key.EkPub) != hex.EncodeToString(encryptingPublicKey) {
-		return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", hex.EncodeToString(secret.Key.EkPub), hex.EncodeToString(encryptingPublicKey))
+	if secret.Key.ParentName != hex.EncodeToString(ekPub.Name.Buffer) {
+		return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", secret.Key.ParentName, hex.EncodeToString(ekPub.Name.Buffer))
 	}
 
 	/// import
@@ -766,50 +652,6 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret, pass
 	if err != nil {
 		return keyfile.TPMKey{}, fmt.Errorf("...can't run import dup %v", err)
 	}
-
-	// create a new session to load
-	load_session, load_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("setting up trial session: %v", err)
-	}
-	defer load_session_cleanup()
-
-	_, err = tpm2.PolicySecret{
-		AuthHandle: tpm2.AuthHandle{
-			Handle: tpm2.TPMRHEndorsement,
-			Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
-			Auth:   tpm2.PasswordAuth(h.Ownerpw),
-		},
-		PolicySession: load_session.Handle(),
-		NonceTPM:      load_session.NonceTPM(),
-	}.Execute(rwr, sess)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("error setting policy PolicySecret %v", err)
-	}
-
-	loadkCmd := tpm2.Load{
-		ParentHandle: tpm2.AuthHandle{
-			Handle: handle,
-			Name:   ekPub.Name,
-			Auth:   load_session,
-		},
-		InPrivate: importResp.OutPrivate,
-		InPublic:  tpm2.New2B(*dupPub),
-	}
-	loadkRsp, err := loadkCmd.Execute(rwr, sess)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("can't load objec: %v", err)
-	}
-
-	defer func() {
-		flushContextCmd := tpm2.FlushContext{
-			FlushHandle: loadkRsp.ObjectHandle,
-		}
-		_, err := flushContextCmd.Execute(rwr)
-		if err != nil {
-			return
-		}
-	}()
 
 	kf := keyfile.NewTPMKey(
 		keyfile.OIDLoadableKey,

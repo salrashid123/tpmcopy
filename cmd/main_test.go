@@ -12,15 +12,17 @@ import (
 
 func TestMain(t *testing.T) {
 	for _, tc := range []struct {
+		Name   string
 		Args   []string
 		Output string
 	}{
 		{
+			Name:   "version",
 			Args:   []string{"--version"},
-			Output: "21\n",
+			Output: "Version: \nDate: \nCommit: \n",
 		},
 	} {
-		t.Run("version", func(t *testing.T) {
+		t.Run(tc.Name, func(t *testing.T) {
 
 			// Create a pipe
 			oldStdout := os.Stdout
@@ -47,9 +49,8 @@ func TestMain(t *testing.T) {
 				t.Fatalf("Failed to read captured output: %v", err)
 			}
 
-			expectedOutput := "Version: \nDate: \nCommit: \n"
-			if buf.String() != expectedOutput {
-				t.Errorf("Expected output '%s', got '%s'", expectedOutput, buf.String())
+			if buf.String() != tc.Output {
+				t.Errorf("Expected output '%s', got '%s'", tc.Output, buf.String())
 			}
 		})
 	}

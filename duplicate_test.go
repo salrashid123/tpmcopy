@@ -4,12 +4,14 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/ecdsa"
+	stdhmac "crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -38,13 +40,13 @@ const (
 	swTPMPathB = "127.0.0.1:2341"
 )
 
-func getPublicKey(t *testing.T, rwr transport.TPM) ([]byte, tpm2.TPMHandle, error) {
+func getPublicKey(t *testing.T, rwr transport.TPM) ([]byte, tpm2.TPMHandle, tpm2.TPMTPublic, error) {
 	createEKB, err := tpm2.CreatePrimary{
 		PrimaryHandle: tpm2.TPMRHEndorsement,
 		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
 	}.Execute(rwr)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, tpm2.TPMTPublic{}, err
 	}
 
 	// defer func() {
@@ -57,31 +59,33 @@ func getPublicKey(t *testing.T, rwr transport.TPM) ([]byte, tpm2.TPMHandle, erro
 		ObjectHandle: createEKB.ObjectHandle,
 	}.Execute(rwr)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, tpm2.TPMTPublic{}, err
 	}
 
 	outPubB, err := pubEKB.OutPublic.Contents()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, tpm2.TPMTPublic{}, err
 	}
 
 	rsaDetailB, err := outPubB.Parameters.RSADetail()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, tpm2.TPMTPublic{}, err
 	}
 
 	rsaUniqueB, err := outPubB.Unique.RSA()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, tpm2.TPMTPublic{}, err
 	}
 
 	rsaPubB, err := tpm2.RSAPub(rsaDetailB, rsaUniqueB)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, tpm2.TPMTPublic{}, err
 	}
 
 	rB, err := x509.MarshalPKIXPublicKey(rsaPubB)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, 0, tpm2.TPMTPublic{}, err
+	}
 	pemdataB := pem.EncodeToMemory(
 		&pem.Block{
 			Type:  "PUBLIC KEY",
@@ -89,7 +93,44 @@ func getPublicKey(t *testing.T, rwr transport.TPM) ([]byte, tpm2.TPMHandle, erro
 		},
 	)
 
-	return pemdataB, createEKB.ObjectHandle, nil
+	var ekPububFromPEMTemplate tpm2.TPMTPublic
+	eblock, _ := pem.Decode(pemdataB)
+	parsedKey, err := x509.ParsePKIXPublicKey(eblock.Bytes)
+	require.NoError(t, err)
+
+	switch pub := parsedKey.(type) {
+	case *rsa.PublicKey:
+		rsaPub, ok := parsedKey.(*rsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPublicKeyRSA{
+				Buffer: rsaPub.N.Bytes(),
+			},
+		)
+	case *ecdsa.PublicKey:
+		ecPub, ok := parsedKey.(*ecdsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgECC,
+			&tpm2.TPMSECCPoint{
+				X: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+				},
+				Y: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+				},
+			},
+		)
+	default:
+
+		return nil, 0, tpm2.TPMTPublic{}, fmt.Errorf("unknown key type %v", pub)
+
+	}
+
+	return pemdataB, createEKB.ObjectHandle, ekPububFromPEMTemplate, nil
 }
 
 func TestGetPublicRSAEK(t *testing.T) {
@@ -181,7 +222,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// ***** first get the ekpubB
 
-			ekpubPEM, ekHandle, err := getPublicKey(t, rwrB)
+			_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -269,7 +310,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 			s, err := Duplicate(&TPMConfig{
 				TPMDevice:               tpmDeviceA,
 				SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-			}, ekpubPEM, duplicatepb.Secret_RSA, "", dupKeyTemplate, sens2B, nil)
+			}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, "", dupKeyTemplate, sens2B, nil)
 			// ************************
 			require.NoError(t, err)
 			_, _ = tpm2.FlushContext{
@@ -302,7 +343,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, err := getPublicKey(t, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -452,7 +493,8 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 
 			// ***** first get the ekpubB
 
-			ekpubPEM, ekHandle, err := getPublicKey(t, rwrB)
+			ekpubPEM, ekHandle, _, err := getPublicKey(t, rwrB)
+
 			require.NoError(t, err)
 
 			defer func() {
@@ -461,6 +503,41 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 				}
 				_, _ = flushContextCmd.Execute(rwrB)
 			}()
+
+			var ekPububFromPEMTemplate tpm2.TPMTPublic
+			eblock, _ := pem.Decode(ekpubPEM)
+			parsedKey, err := x509.ParsePKIXPublicKey(eblock.Bytes)
+			require.NoError(t, err)
+
+			switch pub := parsedKey.(type) {
+			case *rsa.PublicKey:
+				rsaPub, ok := parsedKey.(*rsa.PublicKey)
+				require.True(t, ok)
+				ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+				ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+					tpm2.TPMAlgRSA,
+					&tpm2.TPM2BPublicKeyRSA{
+						Buffer: rsaPub.N.Bytes(),
+					},
+				)
+			case *ecdsa.PublicKey:
+				ecPub, ok := parsedKey.(*ecdsa.PublicKey)
+				require.True(t, ok)
+				ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+				ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+					tpm2.TPMAlgECC,
+					&tpm2.TPMSECCPoint{
+						X: tpm2.TPM2BECCParameter{
+							Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+						},
+						Y: tpm2.TPM2BECCParameter{
+							Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+						},
+					},
+				)
+			default:
+				require.Fail(t, "unknonw public key type %v", pub)
+			}
 
 			/// now read the RSA private key to import/export
 
@@ -537,7 +614,7 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 			s, err := Duplicate(&TPMConfig{
 				TPMDevice:               tpmDeviceA,
 				SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-			}, ekpubPEM, duplicatepb.Secret_RSA, "", dupKeyTemplate, sens2B, pcrMap)
+			}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, "", dupKeyTemplate, sens2B, pcrMap)
 			// ************************
 			require.NoError(t, err)
 			_, _ = tpm2.FlushContext{
@@ -570,7 +647,7 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, err := getPublicKey(t, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -766,7 +843,7 @@ func TestDuplicateECC(t *testing.T) {
 
 	// ***** first get the ekpubB
 
-	ekpubPEM, ekHandle, err := getPublicKey(t, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -775,6 +852,41 @@ func TestDuplicateECC(t *testing.T) {
 		}
 		_, _ = flushContextCmd.Execute(rwrB)
 	}()
+
+	var ekPububFromPEMTemplate tpm2.TPMTPublic
+	eblock, _ := pem.Decode(ekpubPEM)
+	parsedKey, err := x509.ParsePKIXPublicKey(eblock.Bytes)
+	require.NoError(t, err)
+
+	switch pub := parsedKey.(type) {
+	case *rsa.PublicKey:
+		rsaPub, ok := parsedKey.(*rsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPublicKeyRSA{
+				Buffer: rsaPub.N.Bytes(),
+			},
+		)
+	case *ecdsa.PublicKey:
+		ecPub, ok := parsedKey.(*ecdsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgECC,
+			&tpm2.TPMSECCPoint{
+				X: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+				},
+				Y: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+				},
+			},
+		)
+	default:
+		require.Fail(t, "unknonw public key type %v", pub)
+	}
 
 	///  now read the RSA private key to import/export
 
@@ -860,7 +972,7 @@ func TestDuplicateECC(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekpubPEM, duplicatepb.Secret_ECC, "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_ECC, "", dupKeyTemplate, sens2B, nil)
 	// ************************
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -893,7 +1005,7 @@ func TestDuplicateECC(t *testing.T) {
 
 	// now load the key
 
-	_, ekHandleB, err := getPublicKey(t, rwrB)
+	_, ekHandleB, _, err := getPublicKey(t, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1027,7 +1139,7 @@ func TestDuplicateAES(t *testing.T) {
 
 	// ***** first get the ekpubB
 
-	ekpubPEM, ekHandle, err := getPublicKey(t, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1036,7 +1148,40 @@ func TestDuplicateAES(t *testing.T) {
 		}
 		_, _ = flushContextCmd.Execute(rwrB)
 	}()
+	var ekPububFromPEMTemplate tpm2.TPMTPublic
+	eblock, _ := pem.Decode(ekpubPEM)
+	parsedKey, err := x509.ParsePKIXPublicKey(eblock.Bytes)
+	require.NoError(t, err)
 
+	switch pub := parsedKey.(type) {
+	case *rsa.PublicKey:
+		rsaPub, ok := parsedKey.(*rsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPublicKeyRSA{
+				Buffer: rsaPub.N.Bytes(),
+			},
+		)
+	case *ecdsa.PublicKey:
+		ecPub, ok := parsedKey.(*ecdsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgECC,
+			&tpm2.TPMSECCPoint{
+				X: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+				},
+				Y: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+				},
+			},
+		)
+	default:
+		require.Fail(t, "unknonw public key type %v", pub)
+	}
 	///  now read the RSA private key to import/export
 
 	keyFile := "testdata/certs/aes.key"
@@ -1114,7 +1259,7 @@ func TestDuplicateAES(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekpubPEM, duplicatepb.Secret_AES, "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_AES, "", dupKeyTemplate, sens2B, nil)
 
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -1147,7 +1292,7 @@ func TestDuplicateAES(t *testing.T) {
 
 	// now load the key
 
-	_, ekHandleB, err := getPublicKey(t, rwrB)
+	_, ekHandleB, _, err := getPublicKey(t, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1271,7 +1416,7 @@ func TestDuplicateHMAC(t *testing.T) {
 
 	// ***** first get the ekpubB
 
-	ekpubPEM, ekHandle, err := getPublicKey(t, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1281,18 +1426,40 @@ func TestDuplicateHMAC(t *testing.T) {
 		_, _ = flushContextCmd.Execute(rwrB)
 	}()
 
-	///  now read the HMAC private key to import/export
+	var ekPububFromPEMTemplate tpm2.TPMTPublic
+	eblock, _ := pem.Decode(ekpubPEM)
+	parsedKey, err := x509.ParsePKIXPublicKey(eblock.Bytes)
+	require.NoError(t, err)
 
-	// 7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2
-	// echo -n "change this password to a secret" > testdata/certs/hmac.key
-
-	// echo -n "change this password to a secret" | xxd -p -c 100
-	//    6368616e676520746869732070617373776f726420746f206120736563726574
-	// echo -n foo > data.in
-	// openssl dgst -sha256 -mac hmac -macopt hexkey:6368616e676520746869732070617373776f726420746f206120736563726574 data.in
-	//    HMAC-SHA256(data.in)= 7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2
-
-	expectedMAC := "7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2"
+	switch pub := parsedKey.(type) {
+	case *rsa.PublicKey:
+		rsaPub, ok := parsedKey.(*rsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPublicKeyRSA{
+				Buffer: rsaPub.N.Bytes(),
+			},
+		)
+	case *ecdsa.PublicKey:
+		ecPub, ok := parsedKey.(*ecdsa.PublicKey)
+		require.True(t, ok)
+		ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgECC,
+			&tpm2.TPMSECCPoint{
+				X: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+				},
+				Y: tpm2.TPM2BECCParameter{
+					Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+				},
+			},
+		)
+	default:
+		require.Fail(t, "unknonw public key type %v", pub)
+	}
 
 	keyFile := "testdata/certs/hmac.key"
 	keySensitive, err := os.ReadFile(keyFile)
@@ -1362,7 +1529,7 @@ func TestDuplicateHMAC(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekpubPEM, duplicatepb.Secret_HMAC, "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_HMAC, "", dupKeyTemplate, sens2B, nil)
 	// ************************
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -1395,7 +1562,7 @@ func TestDuplicateHMAC(t *testing.T) {
 
 	// now load the key
 
-	_, ekHandleB, err := getPublicKey(t, rwrB)
+	_, ekHandleB, _, err := getPublicKey(t, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1458,7 +1625,23 @@ func TestDuplicateHMAC(t *testing.T) {
 	hmacBytes, err := hmac(rwrB, data, regenHMACKey.ObjectHandle, regenHMACKey.Name, *objAuth)
 	require.NoError(t, err)
 
-	require.Equal(t, hex.EncodeToString(hmacBytes), expectedMAC)
+	// run std hmac and compare
+
+	// echo -n "change this password to a secret" > testdata/certs/hmac.key
+	// echo -n "change this password to a secret" | xxd -p -c 100
+	//    6368616e676520746869732070617373776f726420746f206120736563726574
+	// echo -n foo > data.in
+	// openssl dgst -sha256 -mac hmac -macopt hexkey:6368616e676520746869732070617373776f726420746f206120736563726574 data.in
+	//    HMAC-SHA256(data.in)= 7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2
+
+	//expectedMAC := "7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2"
+	hmacInstance := stdhmac.New(sha256.New, keySensitive)
+	_, err = hmacInstance.Write(data)
+	require.NoError(t, err)
+
+	expectedMAC := hmacInstance.Sum(nil)
+
+	require.Equal(t, hmacBytes, expectedMAC)
 }
 
 func hmac(rwr transport.TPM, data []byte, objHandle tpm2.TPMHandle, objName tpm2.TPM2BName, objAuth tpm2.TPM2BAuth) ([]byte, error) {

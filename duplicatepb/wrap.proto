@@ -39,7 +39,7 @@ message PCRS {
 
 message Key {
   string name = 1;
-  bytes ekPub = 2;
+  string parentName = 2;
   bytes dupPub = 3;
   bytes dupDup = 4;
   bytes dupSeed = 5;

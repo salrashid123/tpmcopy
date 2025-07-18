@@ -41,8 +41,10 @@ var (
 
 	parent = flag.Uint("parent", 0, "parent Handle to encode the TPM key file against (optional)")
 
-	out = flag.String("out", "/tmp/out.json", "File to write the duplicate to")
-	in  = flag.String("in", "/tmp/out.json", "FileName with the key to import")
+	out     = flag.String("out", "/tmp/out.json", "File to write the duplicate to")
+	in      = flag.String("in", "/tmp/out.json", "FileName with the key to import")
+	pubout  = flag.String("pubout", "/tmp/pub.bin", "(optional) File to write the tpm2_tools compatible public part")
+	privout = flag.String("privout", "/tmp/priv.bin", "(optional) File to write the tpm2_tools compatible private part")
 
 	tpmPath  = flag.String("tpm-path", "/dev/tpmrm0", "Create: Path to the TPM device (character device or a Unix socket).")
 	password = flag.String("password", "", "Password for the created key")
@@ -172,6 +174,51 @@ func run() int {
 			return 1
 		}
 
+		var ekPububFromPEMTemplate tpm2.TPMTPublic
+		block, _ := pem.Decode(ep)
+		parsedKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  error parsing encrypting public key : %v", err)
+			return 1
+		}
+
+		switch pub := parsedKey.(type) {
+		case *rsa.PublicKey:
+			rsaPub, ok := parsedKey.(*rsa.PublicKey)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "  error converting encryptingPublicKey to rsa")
+				return 1
+			}
+			ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+			ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+				tpm2.TPMAlgRSA,
+				&tpm2.TPM2BPublicKeyRSA{
+					Buffer: rsaPub.N.Bytes(),
+				},
+			)
+		case *ecdsa.PublicKey:
+			ecPub, ok := parsedKey.(*ecdsa.PublicKey)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "  error converting encryptingPublicKey to ecdsa")
+				return 1
+			}
+			ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+			ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
+				tpm2.TPMAlgECC,
+				&tpm2.TPMSECCPoint{
+					X: tpm2.TPM2BECCParameter{
+						Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+					},
+					Y: tpm2.TPM2BECCParameter{
+						Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+					},
+				},
+			)
+		default:
+			fmt.Fprintf(os.Stderr, "unsupported public key type %v", pub)
+			return 1
+		}
+
 		// now read in the secret
 		f, err := os.ReadFile(*secret)
 		if err != nil {
@@ -199,6 +246,7 @@ func run() int {
 
 		var dupKeyTemplate tpm2.TPMTPublic
 		var sens2B tpm2.TPMTSensitive
+		var kt duplicatepb.Secret_KeyType
 		switch *keyType {
 		case "rsa":
 			kblock, _ := pem.Decode(f)
@@ -207,6 +255,7 @@ func run() int {
 				fmt.Fprintf(os.Stderr, "  error parsing private key : %v", err)
 			}
 
+			kt = duplicatepb.Secret_RSA
 			rsaPriv, ok := parsedKey.(*rsa.PrivateKey)
 			if !ok {
 				fmt.Fprintf(os.Stderr, "error converting local key to rsa")
@@ -313,6 +362,7 @@ func run() int {
 				fmt.Fprintf(os.Stderr, "  error parsing private key : %v", err)
 			}
 
+			kt = duplicatepb.Secret_ECC
 			eccPriv, ok := parsedKey.(*ecdsa.PrivateKey)
 			if !ok {
 				fmt.Fprintf(os.Stderr, "error converting local key to ecc")
@@ -427,6 +477,7 @@ func run() int {
 			privHash := crypto.SHA256.New()
 			privHash.Write(sv)
 			privHash.Write(keySensitive)
+			kt = duplicatepb.Secret_HMAC
 
 			if len(pcrMap) > 0 {
 				dupKeyTemplate = tpm2.TPMTPublic{
@@ -520,7 +571,7 @@ func run() int {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  error parsing private key : %v", err)
 			}
-
+			kt = duplicatepb.Secret_AES
 			sv := make([]byte, 32)
 			io.ReadFull(rand.Reader, sv)
 			privHash := crypto.SHA256.New()
@@ -632,7 +683,7 @@ func run() int {
 			TPMDevice:               rwc,
 			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle,
 			Ownerpw:                 []byte(*ownerpw),
-		}, ep, duplicatepb.Secret_AES, *keyName, dupKeyTemplate, sens2B, pcrMap)
+		}, ekPububFromPEMTemplate, kt, *keyName, dupKeyTemplate, sens2B, pcrMap)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error duplicating %v", err)
 			return 1
@@ -727,6 +778,23 @@ func run() int {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
 			return 1
+		}
+
+		if *pubout != "" {
+			f := tpm2.Marshal(tpmKey.Pubkey)
+			err = os.WriteFile(*pubout, f, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
+				return 1
+			}
+		}
+		if *privout != "" {
+			f := tpm2.Marshal(tpmKey.Privkey)
+			err = os.WriteFile(*privout, f, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
+				return 1
+			}
 		}
 	default:
 		fmt.Println("Unknown mode: must be publickey|duplicate|import")

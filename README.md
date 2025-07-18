@@ -10,7 +10,7 @@ Furthermore, you can place TPM based conditions on the transfer and the use of t
 
 For examples, you can specify a passphrase or certain `PCR` values must be present on use for the destination key.
 
-Alternativley, if you just want some secret to get transferred securely only to get decrypted in  userspace (eg securely transfer raw data vs a key),see 
+Alternativley, if you just want some secret to get transferred securely only to get decrypted in  userspace (eg securely transfer raw data as opposed to a TPM-embedded key), see 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
 
@@ -36,6 +36,8 @@ If you want to transfer an external `RSA|ECC|AES|HMAC` key _from_  `TPM-A`  to `
 
 5. On `TPM-B` use the imported key to sign,encrypt,decrypt,hmac
 
+Note that step 3 is constructed with `PolicyDuplicateSelect` which ensures the key can only exist on the target TPM and cannot get exported further.  For more information, see [Transfer TPM based key using PCR policy](https://gist.github.com/salrashid123/a61e09684c5d59440834d91241627458)
+
 ---
 
 | Option | Description |
@@ -43,8 +45,10 @@ If you want to transfer an external `RSA|ECC|AES|HMAC` key _from_  `TPM-A`  to `
 | **`-tpm-path`** | Path to the TPM device (default: `/dev/tpmrm0`) |
 | **`-mode`** | Operation mode: `publickey duplicate import` (default: ``) |
 | **`-keyType`** | type of key to import/export (`rsa ecc aes hmac`) (default: "rsa") |
-| **`-out`** | File to write the file to import (default: `"/tmp/out.json"`) |
-| **`-in`** | File to read the file to import (default: `"/tmp/out.json"`) |
+| **`-out`** | File to write the file to import (default: `""`) |
+| **`-in`** | File to read the file to import (default: `""`) |
+| **`-pubout`** | Save the imported key as `TPM2B_PUBLIC` (default: `"`) |
+| **`-privout`** | Save the imported private as , `TPM2B_PRIVATE` (default: `"`) |
 | **`-secret`** | File with secret to duplicate (rsa | ecc | hex encoded symmetric key or hmac pass) (default: `/tmp/key.pem`) |
 | **`-password`** | passphrase for the TPM key (default: "") |
 | **`-ownerpw`** | passphrase for the TPM owner (default: "") |
@@ -65,6 +69,7 @@ If you want to transfer an external `RSA|ECC|AES|HMAC` key _from_  `TPM-A`  to `
 * [TPM based Google Cloud Credential Access Token](https://github.com/salrashid123/oauth2)
 * [golang-jwt for Trusted Platform Module (TPM)](https://github.com/salrashid123/golang-jwt-tpm)
 * [TPM Credential Source for Google Cloud SDK](https://github.com/salrashid123/gcp-adc-tpm)
+* [go-tpm-tools: Transferring RSA and Symmetric keys with GCP vTPMs](https://github.com/salrashid123/gcp_tpm_sealed_keys)
 
 ---
 
@@ -83,7 +88,7 @@ go build -o tpm2copy cmd/main.go
 
 To tranfer an `RSA` key from `TPM-A` to `TPM-B`
 
-##### PasswordPolicy
+##### Password Policy
 
 If you want to bind the key to a passphrase
 
@@ -103,14 +108,14 @@ Extract `Endorsement Public Key`
 ```bash
 export TPMB="/dev/tpmrm0"
 
-tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
+tpm2copy  --mode publickey --keyType=rsa -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
 ```
 
 Alternatively, you can use `tpm2_tools`:
 
 ```bash
 tpm2_createek -c /tmp/ek.ctx -G rsa -u /tmp/ek.pub
-tpm2_readpublic -c /tmp/ek.ctx -o /tmp/public.pem -f PEM -Q
+tpm2_readpublic -c /tmp/ek.ctx -o /tmp/public.pem -f PEM -n /tmp/ek.name 
 
 ## or extract the ekcert x509 
 tpm2_getekcertificate -X -o EKCert.bin
@@ -127,7 +132,7 @@ load and duplicate the external key and bind it to a password
 ### you can use a  TPM simulator or a real tpm to load the external key
 export TPMA="/dev/tpmrm0"
 
-tpm2copy --mode duplicate  --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
+tpm2copy --mode duplicate  --secret=/tmp/key_rsa.pem  --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 ```
 
 copy `/tmp/out.json` to `TPM-B`
@@ -167,7 +172,7 @@ $ tpm2_flushcontext -t &&  tpm2_flushcontext -s  &&  tpm2_flushcontext -l
 $ tpm2_pcrread sha256:23
   sha256:
     23: 0x0000000000000000000000000000000000000000000000000000000000000000
-$ tpm2_pcrextend 23:sha256=0x0$000000000000000000000000000000000000000000000000000000000000000
+$ tpm2_pcrextend 23:sha256=0x0000000000000000000000000000000000000000000000000000000000000000
 
 $ tpm2_pcrread sha256:23
   sha256:
@@ -293,11 +298,77 @@ go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB --passwo
 
 ---
 
+### TPM2_TOOLS compatibility
+
+If you wanted to use `tpm2_tools` on the key imported to `TPM-B`, then use the `--pubout=` and `--privout=` parameters when importing.
+
+What that'll do is save the key as `[TPM2B_PUBLIC, TPM2B_PRIVATE]`
+
+For example, the follwoing will import the password or pcr policy encoded files and use tpm2_tools to perform further operations.
+
+on `TPM-B`, save the ek (and optionallhy as a persistent handle)
+
+```bash
+
+tpm2_createek -c /tmp/ek.ctx -G rsa -u /tmp/ek.pub
+tpm2_readpublic -c /tmp/ek.ctx -o /tmp/ek.pem -f PEM -n /tmp/ek.name
+```
+
+then when running `import`, specify the files
+
+```bash
+go run cmd/main.go --mode import \
+   --pubout=/tmp/pub.dat --privout=/tmp/priv.dat --in=/tmp/out.json \
+   --out=/tmp/tpmkey.pem --tpm-path=$TPMB
+```
+
+If the key had a `password` policy
+
+```bash
+tpm2 flushcontext -t
+tpm2 startauthsession --session /tmp/session.ctx --policy-session
+tpm2 policysecret --session /tmp/session.ctx --object-context endorsement
+
+tpm2_load -C /tmp/ek.ctx -c /tmp/key.ctx -u /tmp/pub.dat -r /tmp/priv.dat --auth session:session.ctx
+
+tpm2 flushcontext -t
+tpm2 startauthsession --session session.ctx --policy-session
+tpm2 policysecret --session session.ctx --object-context endorsement
+
+echo -n "foo" >/tmp/file.txt
+tpm2_sign -c key.ctx -g sha256  -f plain -p bar -o sig.rss  /tmp/file.txt
+```
+
+If the key had a pcr policy
+
+```bash
+### load
+tpm2 flushcontext -t
+tpm2 startauthsession --session /tmp/session.ctx --policy-session
+tpm2 policysecret --session /tmp/session.ctx --object-context endorsement
+tpm2_load -C /tmp/ek.ctx -c /tmp/key.ctx -u /tmp/pub.dat -r /tmp/priv.dat --auth session:session.ctx
+
+## regenerate the full policy
+tpm2_startauthsession -S sessionA.dat --policy-session
+tpm2_policyduplicationselect -S sessionA.dat  -N /tmp/ek.name -L policyA_dupselect.dat 
+tpm2_flushcontext sessionA.dat
+rm sessionA.dat
+
+tpm2_startauthsession -S sessionA.dat --policy-session
+tpm2_policypcr -S sessionA.dat -l "sha256:23" -f pcr23_valA.bin -L policyA_pcr.dat 
+tpm2_policyor -S sessionA.dat -L policyA_or.dat sha256:policyA_pcr.dat,policyA_dupselect.dat 
+
+### test sign
+echo -n "foo" >/tmp/file.txt
+tpm2_sign -c key.ctx -g sha256 -f plain  -o signB.raw /tmp/file.txt -p "session:sessionA.dat" 
+rm sessionA.dat
+```
+
 ### Setup Software TPM
 
-If you want to test locally with two [software TPM]s(https://github.com/stefanberger/swtpm)
+If you want to test locally with two [software TPM](https://github.com/stefanberger/swtpm)
 
-Start `TPM-A`
+- Start `TPM-A`
 
 ```bash
 ## TPM A
@@ -337,7 +408,7 @@ $ tpm2_pcrread sha256:23
 ### derive the RSA EK and persist it to nv at handle 0x81010001
 tpm2_evictcontrol -c 0x81010001
 tpm2_createek -c /tmp/ek.ctx -G rsa -u /tmp/ek.pub -c 0x81010001
-tpm2_readpublic -c /tmp/ek.ctx -o /tmp/ek.pem -f PEM -Q
+tpm2_readpublic -c /tmp/ek.ctx -o /tmp/ek.pem -f PEM -n ek.name -Q
 
 tpm2_getekcertificate -X -o EKCert.bin
 openssl x509 -in EKCert.bin -inform DER -noout -text
@@ -363,7 +434,7 @@ xxd -p -c 100 /tmp/ekpubAname.bin
 
 ### Key Formats
 
-This utility encodes the key to transfer as protobuf
+This utility encodes the key to transfer as protobuf during the `Duplicate()` step
 
 ```proto
 syntax = "proto3";
@@ -395,7 +466,7 @@ message PCRS {
 
 message Key {
   string name = 1;
-  bytes ekPub = 2;
+  string parentName = 2;
   bytes dupPub = 3;
   bytes dupDup = 4;
   bytes dupSeed = 5;
@@ -405,75 +476,34 @@ message Key {
 So an output file may look like:
 
 ```json
-cat /tmp/out.json| jq '.'
-
 {
   "version": 1,
-  "type": "AES",
-  "pcrs": [
-    {
-      "pcr": 23,
-      "value": "9aX9QtFqIDAnmO9u0wmXm0MAPSMg2fDo6pgxqSdZ+0s="
-    }
-  ],
+  "type": "RSA",
+  "userAuth": true,
   "key": {
-    "ekPub": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUFpT21mVFVhaGZPODhPNjArajhqZgo0VnQvQ3Rpd1BsMmQyWE5oUno2NE5LWDZreFExVzg3NnAwbFFsbFM1a25UZ1pkdG1xRzBzL0ZqN2hRM1pRSXJuCkpsUkRoZC9vai8yNFk3RzV4RUhTNkJML1VQTzhPUS9VaHgxMjZOb3Npb0FhcmJ0d2R5T1lxSDBWQkwyMjJ4UXUKMHpCd0o1cVcxMjAwN2c1Z2dzLzJjeklNbUxXSjZWN1p1Vy9lV1JwQTd4eWFOYS9KZUw3U1NQMEM4b0RrbkxPYwpjZlI1ZGpYd0J1bVZpbXJLUjZxb1h0bzFzbE1CZjYxT3pQNnFVT2VrTnJSSXh6QXZ4ZmZ6SXlER0hzanM5SXZSCmhib29MSlJ1czFFRklzeTdTdFF5dENXY1lOemhicHI3cGFMNXI2MnFkOGZ5VVFjQ0IwWFIwbzJuVy9VRStzRVoKRndJREFRQUIKLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==",
-    "dupPub": "AAEACwAEAAAAIBpYx5LkU8MQ4Phrbixlk+FiA8bTuGi1PgMO8xJhA351ABAAFAALCAAAAQABAQDYVPdGjOF0sqBDif2WhImCDy8MJhRDaGmmsqb4ZA1F7ipuwgTK+16rcILmpFXhLJHWLAPUY6IQAE8cBZtchdlV/DJXw0QdFHI2BZpG585/dHg/YtPeHhb6YL6zTsnORwKVMICio7I+IUyzziMXLI7gbzH/3U+fUWw/7UFl4V48xwcrG42vmhNdA3+trnpT95x0A81DBHwDX2yd55RuIUZMcOzB+TT7t71kPkX0mDn6t9OKSYdEBWZQqCsYjnVIHH5ALzEVJIdZaH1mlAMes3mK/b3CvOzo1GNpPbqk6JyKJmxK5z0IfKYPw1Qe3K6SBQjqS9t88TYsDsaGsjfzCQgV",
-    "dupDup": "ACDrGDROfkDRq8ckoIrCDBOh+NpMstw8qWZvSYMfp3NQNaoRY3iRkwhKedu6WXLmsTTC0iLRA7/wT8NQeUVdvXYVr8ICI+ET3iGH3AMmGjRWh7gS8Uytvi8rC8yE9Z7SWICwyFas5Vy92ZGQ01+9QvyRoPFAkOrOe6C1d6dNywE4MJL3fCGIVPG1AySa4nWWKKJk7BfVQ86qqqSbJu+veWAYMPZA6x0gNw2hEjW/9XhuQDVG9rXseFUC5tyh2cjSRbt28DqWzF3eu+qJ",
-    "dupSeed": "SSABqRX/aHB5N0PaljRkWXZqoJkSwIDmDFi83tI61A95oAWEnuT2JJ0vjK/+UYWGwu1UYZWMgeVY/EmuBen72kmPbu2jxKaw4jafHgN3VILsF0drEMyjrXehFiArJP76llB8OZwG9onGFIAgfBzQMtjolAdjNaU8+UUKc2tg/tvQb2d5ueaRUxX4Gdpu9QgTnf0UyabM4QHKW74mfkpBbNxSZw6Lcv61UuYSkgCidNgmP+MpWMdbf+nHepE6AtW5cQN2UKA/1G0uMRpuj2+6zICq6EwNW2fnVdtXj/hmhEY/Xn6+p/5x3oSWv8d+dHW50CEIzxlozFw32KL4xA+tAQ=="
+    "parentName": "000bbc0c7f8b565f09e4614624fa6f46ece235c9904d47050e8a8dd466ac9b96d49b",
+    "dupPub": "AAEACwAEAEAAIFF/bp7yUPnb8+9Yxzd7t+G1XfxzlxHT5pLU2tX9FBQzABAAFAALCAAAAQABAQDYVPdGjOF0sqBDif2WhImCDy8MJhRDaGmmsqb4ZA1F7ipuwgTK+16rcILmpFXhLJHWLAPUY6IQAE8cBZtchdlV/DJXw0QdFHI2BZpG585/dHg/YtPeHhb6YL6zTsnORwKVMICio7I+IUyzziMXLI7gbzH/3U+fUWw/7UFl4V48xwcrG42vmhNdA3+trnpT95x0A81DBHwDX2yd55RuIUZMcOzB+TT7t71kPkX0mDn6t9OKSYdEBWZQqCsYjnVIHH5ALzEVJIdZaH1mlAMes3mK/b3CvOzo1GNpPbqk6JyKJmxK5z0IfKYPw1Qe3K6SBQjqS9t88TYsDsaGsjfzCQgV",
+    "dupDup": "ACBfLKyJByo0CeEfy7le/9BIduaQ0XSIS9F3O4474ZP3dvGMzH2bs2BPvxm04j4M+vaCO9JizcHuSkDvPsYLCbVzlJydw5OWIElYaC7Cjy+/CqWdDIhU9L0KvTqxt/vEToT9YmWxekhiBvZS3ldIVop0LKv20qg9JuiHosqdJVCQcW0LWVwKmDV34SaKdkww4uSuVp3Cfe24+oiwNHM8Vx5ZpIi1RgKMzDlNzh6aOlE1yxJKK87ZITZXf1Hs2YlyUIMXKJTD1HPrI+Tr",
+    "dupSeed": "I6KssTdPlLpPV1COj89/rRH5UvaivSsOWLY/kiV1d7dTqcH1bb7zndTh6NAkLVoANnhaLYoV87ypBFoNbcZOBlj7K2HwEFpyHBOpIhk6Tn1FzfqcY9FxKoTfeHyMB6VPtoVw+5YsF+p6QOIfVxE0XtfL4AMWNwQmKgavaPDdRPpD4Etnk16lH27GS/4nL/Dwcpbzwnu/117DbZbW29KDrsMFPmCPeKStvOJv102AP7Kmo3vS2DZP25hM3MN/8Q26jVMJdeP66AlBzVDuzhfVqntuRE9eTTLMTMHTZaO5+U2HOkXwQ/g2MuzodjPODQEw4uzuCeCPA/UHKDMYKjjYHA=="
   }
 }
 ```
 
-Finally, the `Import()` function saves the imported using [ASN.1 Specification for TPM 2.0 Key Files](https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html) which is the format openssl (mostly) follows.
-
-
-One specific difference to note is the parent value encoded in the PEM file is transient.  If you want to specify a persistent handle for the PEM file which indicates its an  EK
-
-on `TPM-B`, save the ek as a peristent handle
+where the `parentName` is actually the duplicating parents 'name' on `TPM-B`:
 
 ```bash
-tpm2_evictcontrol -c 0x81010001
-tpm2_createek -c /tmp/ek.ctx -G rsa -u /tmp/ek.pub -c 0x81010001
-Tpm2_readpublic -c /tmp/ek.ctx -o /tmp/ek.pem -f PEM -Q
+$ xxd -p -c 100 /tmp/ek.name 
+000bbc0c7f8b565f09e4614624fa6f46ece235c9904d47050e8a8dd466ac9b96d49b
 ```
 
-then when running `impoart`, specify the handle
+As mentioned, the `Import()` function saves the imported using in two ways:
 
-```bash
-go run cmd/main.go --mode import --in=/tmp/out.json --out=/tmp/tpmkey.pem --parent 0x81010001 --tpm-path=$TPMB
+1.  `--out=` parameter saves the imported key as [ASN.1 Specification for TPM 2.0 Key Files](https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html) which is the format openssl (mostly) follows.  However, to use this you need to specify the parent as the endorsement RSA key and not the H2 tepmplate.
 
+2. `--pubout=` and `--privout=` parameters saves they key in raw formats which can be used with `tpm2_tools`
 
-$ cat /tmp/tpmkey.pem 
------BEGIN TSS2 PRIVATE KEY-----
-MIICMAYGZ4EFCgEDAgUAgQEAAQSCAToBOAABAAsABABAACBRf26e8lD52/PvWMc3
-e7fhtV38c5cR0+aS1NrV/RQUMwAQABQACwgAAAEAAQEA2FT3RozhdLKgQ4n9loSJ
-gg8vDCYUQ2hpprKm+GQNRe4qbsIEyvteq3CC5qRV4SyR1iwD1GOiEABPHAWbXIXZ
-VfwyV8NEHRRyNgWaRufOf3R4P2LT3h4W+mC+s07JzkcClTCAoqOyPiFMs84jFyyO
-4G8x/91Pn1FsP+1BZeFePMcHKxuNr5oTXQN/ra56U/ecdAPNQwR8A19sneeUbiFG
-THDswfk0+7e9ZD5F9Jg5+rfTikmHRAVmUKgrGI51SBx+QC8xFSSHWWh9ZpQDHrN5
-iv29wrzs6NRjaT26pOiciiZsSuc9CHymD8NUHtyukgUI6kvbfPE2LA7GhrI38wkI
-FQSB4ADeACC8Xk6lqtcdXW6xFmQ4a/Bh8teZl+QwIHbidVhXtvF9ewAQKj/asaTM
-JSohdcQjBitC8sroagYNjYUzzDcY9b0ik29NIm2Ve7o/UmDS1oKZz9UD5wFiuh/R
-XAxtOBNwN9BJyj/gXGQ823QZdCGbv+ZoaC96kwEM518sjJw0GcYzFEkJaFkEcBM9
-wt1JJgS7zO2UG/ZtNxJxNpqFu6P7yvgo0GvcQFsuUujgdavBGJNuNjtLVYp7nNaX
-ICPvLqJ5+Fi3nqz0xtO7wdt4zjnxPPTJRg6h/OSltIXQltX2
------END TSS2 PRIVATE KEY-----
-
-
-### which will encode the persistent handle as the parent object 
-
-$  openssl asn1parse -in tpmkey.pem
-    0:d=0  hl=4 l= 560 cons: SEQUENCE          
-    4:d=1  hl=2 l=   6 prim: OBJECT            :2.23.133.10.1.3
-   12:d=1  hl=2 l=   5 prim: INTEGER           :81010001   <<<<<<<<<<<<<<<<<<<<<<<
-   19:d=1  hl=4 l= 314 prim: OCTET STRING      [HEX DUMP]:01380001000B000400400020517F6E9EF250F9DBF3EF58C7377BB7E1B55DFC739711D3E692D4DAD5FD14143300100014000B0800000100010100D854F7468CE174B2A04389FD968489820F2F0C2614436869A6B2A6F8640D45EE2A6EC204CAFB5EAB7082E6A455E12C91D62C03D463A210004F1C059B5C85D955FC3257C3441D147236059A46E7CE7F74783F62D3DE1E16FA60BEB34EC9CE4702953080A2A3B23E214CB3CE23172C8EE06F31FFDD4F9F516C3FED4165E15E3CC7072B1B8DAF9A135D037FADAE7A53F79C7403CD43047C035F6C9DE7946E21464C70ECC1F934FBB7BD643E45F49839FAB7D38A498744056650A82B188E75481C7E402F3115248759687D6694031EB3798AFDBDC2BCECE8D463693DBAA4E89C8A266C4AE73D087CA60FC3541EDCAE920508EA4BDB7CF1362C0EC686B237F3090815
-  337:d=1  hl=3 l= 224 prim: OCTET STRING      [HEX DUMP]:00DE0020BC5E4EA5AAD71D5D6EB11664386BF061F2D79997E4302076E2755857B6F17D7B00102A3FDAB1A4CC252A2175C423062B42F2CAE86A060D8D8533CC3718F5BD22936F4D226D957BBA3F5260D2D68299CFD503E70162BA1FD15C0C6D38137037D049CA3FE05C643CDB741974219BBFE668682F7A93010CE75F2C8C9C3419C63314490968590470133DC2DD492604BBCCED941BF66D371271369A85BBA3FBCAF828D06BDC405B2E52E8E075ABC118936E363B4B558A7B9CD6972023EF2EA279F858B79EACF4C6D3BBC1DB78CE39F13CF4C9460EA1FCE4A5B485D096D5F6
-
-```
 
 ---
-
 
 #### TODO:
 
