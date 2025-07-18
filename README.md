@@ -125,7 +125,7 @@ load and duplicate the external key and bind it to a password
 
 ```bash
 ### you can use a  TPM simulator or a real tpm to load the external key
-export TPMA="simulator" ### or export TPMA="/dev/tpmrm0"
+export TPMA="/dev/tpmrm0"
 
 tpm2copy --mode duplicate  --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 ```
@@ -180,7 +180,7 @@ copy `public.pem` to `TPM-A`
 
 ```bash
 ### you can use a  TPM simulator or a real tpm to load the external key
-export TPMA="simulator" ### or export TPMA="/dev/tpmrm0"
+export TPMA="/dev/tpmrm0"
 tpm2copy --mode duplicate --keyType=rsa \
    --secret=/tmp/key_rsa.pem  --pcrValues=23:f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b \
    -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
@@ -219,7 +219,7 @@ tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 
 ### TPM-A
 ## Password
-export TPMA="simulator" ### or export TPMA="/dev/tpmrm0"
+export TPMA="/dev/tpmrm0"
 tpm2copy --mode duplicate --keyType=ecc --secret=/tmp/key_ecc.pem \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 
@@ -247,7 +247,7 @@ tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 ###  copy  to TPM-A
 
 ### TPM-A
-export TPMA="simulator" ### or export TPMA="/dev/tpmrm0"
+export TPMA="/dev/tpmrm0"
 tpm2copy --mode duplicate --keyType=aes --secret=/tmp/aes.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 
@@ -278,7 +278,7 @@ tpm2copy --mode publickey -tpmPublicKeyFile /tmp/public.pem --tpm-path=$TPMB
 ###  copy  to TPM-A
 
 ### TPM-A
-export TPMA="simulator" ### or export TPMA="/dev/tpmrm0"
+export TPMA="/dev/tpmrm0"
 tpm2copy --mode duplicate --keyType=hmac --secret=/tmp/hmac.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
 
