@@ -34,7 +34,7 @@ func TestMain(t *testing.T) {
 		},
 		{
 			Name:        "duplicate_password",
-			Args:        []string{"--mode=duplicate", "--secret=../testdata/certs/key_rsa.pem", "--password=bar", "--tpmPublicKeyFile=/tmp/public.pem", fmt.Sprintf("--out=%s/out.json", tempDirA), fmt.Sprintf("-tpm-path=%s", TPMA)},
+			Args:        []string{"--mode=duplicate", "--keyType=rsa", "--secret=../testdata/certs/key_rsa.pem", "--password=bar", "--tpmPublicKeyFile=/tmp/public.pem", fmt.Sprintf("--out=%s/out.json", tempDirA), fmt.Sprintf("-tpm-path=%s", TPMA)},
 			Output:      fmt.Sprintf("Duplicate Key written to: %s/out.json\n", tempDirA),
 			ExpectError: false,
 		},
@@ -57,11 +57,6 @@ func TestMain(t *testing.T) {
 			os.Args = append(os.Args, tc.Args...)
 
 			exitVal := run()
-			if tc.ExpectError {
-				require.Equal(t, 1, exitVal)
-			} else {
-				require.Equal(t, 0, exitVal)
-			}
 
 			err = w.Close()
 			require.NoError(t, err)
@@ -69,6 +64,11 @@ func TestMain(t *testing.T) {
 			var buf bytes.Buffer
 			_, err = io.Copy(&buf, r)
 			require.NoError(t, err)
+			if tc.ExpectError {
+				require.Equal(t, 1, exitVal)
+			} else {
+				require.Equal(t, 0, exitVal)
+			}
 
 			require.Equal(t, tc.Output, buf.String())
 
