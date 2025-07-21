@@ -79,11 +79,11 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 	} else {
 		ecDetail, err := pub.Parameters.ECCDetail()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get rsa public: %v", err)
+			return nil, fmt.Errorf("failed to get ecc public: %v", err)
 		}
 		crv, err := ecDetail.CurveID.Curve()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get rsa public: %v", err)
+			return nil, fmt.Errorf("failed to get ecc public: %v", err)
 		}
 
 		eccUnique, err := pub.Unique.ECC()
@@ -111,7 +111,7 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 }
 
 // create a duplicate of the given key type and template
-func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
+func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, parentKeyType duplicatepb.Secret_ParentKeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
 
 	if h.SessionEncryptionHandle == 0 {
 		return duplicatepb.Secret{}, fmt.Errorf("error please specify a sessionEncryptionHandle")
@@ -150,6 +150,18 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 	ekName, err := tpm2.ObjectName(&ekPububFromPEMTemplate)
 	if err != nil {
 		return duplicatepb.Secret{}, fmt.Errorf(" failed to get name key: %v", err)
+	}
+
+	if parentKeyType == duplicatepb.Secret_EKRSA {
+		_, err = ekPububFromPEMTemplate.Parameters.RSADetail()
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf(" mismatched ekPublic type, delcared RSA but  ekPububFromPEMTemplate is not RSA")
+		}
+	} else {
+		_, err = ekPububFromPEMTemplate.Parameters.ECCDetail()
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf(" mismatched ekPublic type, delcared ECC but  ekPububFromPEMTemplate is not ECC")
+		}
 	}
 
 	// create a generic local primary key
@@ -191,7 +203,6 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 	var dupSeed []byte
 
 	var pcv []*duplicatepb.PCRS
-	var userAuth bool
 	if len(pcrs) > 0 {
 		// create a pcr trial session to get its digest
 		pcr_sess_trial, pcr_sess_trial_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Trial(), tpm2.AESEncryption(128, tpm2.EncryptInOut), tpm2.Salted(h.SessionEncryptionHandle, *encryptionPub)}...)
@@ -408,10 +419,32 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 
 	} else {
 
-		// userAuth
-		// first create a trial session which uses PolicyDuplicationSelect to bind
-		// the duplication to eh ekPub of the remote TPM
-		userAuth = true
+		// create a pcr trial session to get its digest
+		pa_sess_trial, pa_sess_trial_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Trial(), tpm2.AESEncryption(128, tpm2.EncryptInOut), tpm2.Salted(h.SessionEncryptionHandle, *encryptionPub)}...)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("setting up trial session: %v", err)
+		}
+		defer pa_sess_trial_cleanup()
+
+		_, err = tpm2.PolicyAuthValue{
+			PolicySession: pa_sess_trial.Handle(),
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error executing PolicyPCR: %v", err)
+		}
+
+		// read the digest
+		papgd, err := tpm2.PolicyGetDigest{
+			PolicySession: pa_sess_trial.Handle(),
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error executing PolicyGetDigest: %v", err)
+		}
+		err = pa_sess_trial_cleanup()
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error purging session: %v", err)
+		}
+
 		dupselect_sess_trial, dupselect_trial_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Trial(), tpm2.AESEncryption(128, tpm2.EncryptInOut), tpm2.Salted(h.SessionEncryptionHandle, *encryptionPub)}...)
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("setting up trial session: %v", err)
@@ -438,7 +471,34 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 			return duplicatepb.Secret{}, fmt.Errorf("error purging session: %v", err)
 		}
 
-		dupTemplate.AuthPolicy = pgd.PolicyDigest
+		// create an OR policy which includes the PolicyPCR and PolicyDuplicationSelect digests
+		or_sess_trial, or_sess_tiral_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Trial(), tpm2.AESEncryption(128, tpm2.EncryptInOut), tpm2.AESEncryption(128, tpm2.EncryptOut), tpm2.Salted(h.SessionEncryptionHandle, *encryptionPub)}...)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("setting up trial session: %v", err)
+		}
+		defer or_sess_tiral_cleanup()
+
+		_, err = tpm2.PolicyOr{
+			PolicySession: or_sess_trial.Handle(),
+			PHashList:     tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{papgd.PolicyDigest, pgd.PolicyDigest}},
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error setting policyOR %v", err)
+		}
+
+		// calculate the OR hash
+		or_trial_digest, err := tpm2.PolicyGetDigest{
+			PolicySession: or_sess_trial.Handle(),
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error executing PolicyGetDigest: %v", err)
+		}
+		err = or_sess_tiral_cleanup()
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error purging session: %v", err)
+		}
+
+		dupTemplate.AuthPolicy = or_trial_digest.PolicyDigest
 		sens2B := tpm2.Marshal(dupSensitive)
 		l := tpm2.Marshal(tpm2.TPM2BPrivate{Buffer: sens2B})
 		dupPriv := tpm2.TPM2BPrivate{Buffer: l}
@@ -500,25 +560,45 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 			_, _ = flushContextCmd.Execute(rwr)
 		}()
 
+		// // setup a real session with just PolicyDuplicationSelect
+		or_sess, aor_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.AESEncryption(128, tpm2.EncryptInOut), tpm2.Salted(h.SessionEncryptionHandle, *encryptionPub)}...)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("setting up trial session: %v", err)
+		}
+		defer aor_cleanup()
+
+		_, err = tpm2.PolicyDuplicationSelect{
+			PolicySession: or_sess.Handle(),
+			NewParentName: newParentLoad.Name,
+			ObjectName:    loadResponse.Name,
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error setting  PolicyDuplicationSelect %v", err)
+		}
+
+		dupselpgd2, err := tpm2.PolicyGetDigest{
+			PolicySession: or_sess.Handle(),
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error executing PolicyGetDigest: %v", err)
+		}
+
+		// calculate the OR policy using the digest for the PCR and the "real" sessions PolicyDuplicationSelect value
+		_, err = tpm2.PolicyOr{
+			PolicySession: or_sess.Handle(),
+			PHashList:     tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{papgd.PolicyDigest, dupselpgd2.PolicyDigest}},
+		}.Execute(rwr)
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error setting policy PolicyOr %v", err)
+		}
+
 		// create the duplicate but set the Auth to the real policy.  Since we used PolicyDuplicationSelect, the
 		//  auth will get fulfilled
 		duplicateResp, err := tpm2.Duplicate{
 			ObjectHandle: tpm2.AuthHandle{
 				Handle: loadResponse.ObjectHandle,
 				Name:   loadResponse.Name,
-				Auth: tpm2.Policy(tpm2.TPMAlgSHA256, 16, tpm2.PolicyCallback(func(tpm transport.TPM, handle tpm2.TPMISHPolicy, _ tpm2.TPM2BNonce) error {
-
-					_, err = tpm2.PolicyDuplicationSelect{
-						PolicySession: handle,
-						NewParentName: newParentLoad.Name,
-						ObjectName:    loadResponse.Name,
-					}.Execute(rwr)
-
-					if err != nil {
-						return err
-					}
-					return nil
-				})),
+				Auth:   or_sess,
 			},
 			NewParentHandle: tpm2.NamedHandle{
 				Handle: newParentLoad.ObjectHandle,
@@ -527,14 +607,12 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 			Symmetric: tpm2.TPMTSymDef{
 				Algorithm: tpm2.TPMAlgNull,
 			},
-		}.Execute(rwr, sess) // no need to set rsessInOut since the session is encrypted
+		}.Execute(rwr) // no need to set rsessInOut since the session is encrypted
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("duplicateResp can't crate duplicate %v", err)
 		}
 		pb := tpm2.New2B(dupTemplate)
 
-		// generate the bytes for the duplication
-		// generate the bytes for the duplication
 		dupPub = pb.Bytes()
 		dupSeed = duplicateResp.OutSymSeed.Buffer
 		dupDup = duplicateResp.Duplicate.Buffer
@@ -544,15 +622,16 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 	// https://github.com/salrashid123/tpm2/tree/master/policy_gen
 
 	return duplicatepb.Secret{
-		Name:     keyName,
-		Version:  1,
-		Type:     keyType,
-		UserAuth: userAuth,
+		Name:          keyName,
+		Version:       1,
+		Type:          keyType,
+		ParentKeyType: parentKeyType,
 		Key: &duplicatepb.Key{
 			ParentName: hex.EncodeToString(ekName.Buffer),
 			DupPub:     dupPub,
 			DupSeed:    dupSeed,
 			DupDup:     dupDup,
+			EmptyAuth:  true,
 		},
 		Pcrs: pcv,
 	}, nil
@@ -560,11 +639,15 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 }
 
 // import the given duplicate secret into a target tpm
-func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret, password []byte) (keyfile.TPMKey, error) {
+func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (keyfile.TPMKey, error) {
 
 	if h.SessionEncryptionHandle == 0 {
 		return keyfile.TPMKey{}, fmt.Errorf("error please specify a sessionEncryptionHandle")
 	}
+
+	// if !keyfile.IsMSO(handle, keyfile.TPM_HT_PERSISTENT) {
+	// 	return keyfile.TPMKey{}, fmt.Errorf("error please specify a persistent handle as the parent")
+	// }
 
 	rwr := transport.FromReadWriter(h.TPMDevice)
 
@@ -657,9 +740,9 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret, pass
 		keyfile.OIDLoadableKey,
 		tpm2.New2B(*dupPub),
 		importResp.OutPrivate,
-		keyfile.WithParent(handle),
-		keyfile.WithUserAuth(password),
+		keyfile.WithParent(handle), //(tpm2.TPMRHOwner), // the parent isnt really the owner
 	)
 
+	kf.EmptyAuth = secret.Key.EmptyAuth
 	return *kf, nil
 }

@@ -70,22 +70,15 @@ func run() int {
 		return 1
 	}
 
-	primaryKey, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
-		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+	pubregen, err := tpm2.ReadPublic{
+		ObjectHandle: key.Parent,
 	}.Execute(rwr)
 	if err != nil {
 		fmt.Println(err)
 		return 1
 	}
 
-	defer func() {
-		flushContextCmd := tpm2.FlushContext{
-			FlushHandle: primaryKey.ObjectHandle,
-		}
-		_, _ = flushContextCmd.Execute(rwr)
-	}()
-
+	log.Printf("Using persistentHandle Name: %s\n", hex.EncodeToString(pubregen.Name.Buffer))
 	// create a new session to load
 	load_session, load_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
 	if err != nil {
@@ -110,8 +103,8 @@ func run() int {
 
 	rsaKey, err := tpm2.Load{
 		ParentHandle: tpm2.AuthHandle{
-			Handle: primaryKey.ObjectHandle,
-			Name:   tpm2.TPM2BName(primaryKey.Name),
+			Handle: key.Parent,
+			Name:   pubregen.Name,
 			Auth:   load_session,
 		},
 		InPublic:  key.Pubkey,
@@ -139,7 +132,7 @@ func run() int {
 	digest := h.Sum(nil)
 
 	// construct the policy using the utility in this library
-	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), pubregen.Name)
 	if err != nil {
 		fmt.Println(err)
 		return 1
@@ -151,83 +144,6 @@ func run() int {
 		return 1
 	}
 	defer or_cleanup()
-
-	// or consturct it manually:
-
-	// pa_sess, pa_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-	// if err != nil {
-	// 	return 1
-	// }
-	// defer pa_cleanup()
-
-	// _, err = tpm2.PolicyAuthValue{
-	// 	PolicySession: pa_sess.Handle(),
-	// }.Execute(rwr)
-	// if err != nil {
-	// 	return 1
-	// }
-
-	// papgd, err := tpm2.PolicyGetDigest{
-	// 	PolicySession: pa_sess.Handle(),
-	// }.Execute(rwr)
-	// if err != nil {
-	// 	return 1
-	// }
-	// err = pa_cleanup()
-	// if err != nil {
-	// 	return 1
-	// }
-
-	// // as the "new parent"
-	// dupselect_sess, dupselect_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-	// if err != nil {
-	// 	return 1
-	// }
-	// defer dupselect_cleanup()
-
-	// _, err = tpm2.PolicyDuplicationSelect{
-	// 	PolicySession: dupselect_sess.Handle(),
-	// 	NewParentName: primaryKey.Name,
-	// }.Execute(rwr)
-	// if err != nil {
-	// 	return 1
-	// }
-
-	// // calculate the digest
-	// dupselpgd, err := tpm2.PolicyGetDigest{
-	// 	PolicySession: dupselect_sess.Handle(),
-	// }.Execute(rwr)
-	// if err != nil {
-	// 	return 1
-	// }
-	// err = dupselect_cleanup()
-	// if err != nil {
-	// 	return 1
-	// }
-
-	// // now create an OR session with the two above policies above
-	// or_sess, or_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Auth([]byte(*password))}...)
-
-	// if err != nil {
-	// 	return 1
-	// }
-	// defer or_cleanup()
-
-	// _, err = tpm2.PolicyAuthValue{
-	// 	PolicySession: or_sess.Handle(),
-	// }.Execute(rwr)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return 1
-	// }
-
-	// _, err = tpm2.PolicyOr{
-	// 	PolicySession: or_sess.Handle(),
-	// 	PHashList:     tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{papgd.PolicyDigest, dupselpgd.PolicyDigest}},
-	// }.Execute(rwr)
-	// if err != nil {
-	// 	return 1
-	// }
 
 	sign := tpm2.Sign{
 		KeyHandle: tpm2.AuthHandle{

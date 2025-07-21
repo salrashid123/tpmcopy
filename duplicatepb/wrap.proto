@@ -19,14 +19,18 @@ $ protoc -I ./ --include_imports \
 message Secret {
   string name = 1;
   int32 version = 2;
-  KeyType type = 3;
+  KeyType type = 3; 
   enum KeyType {
     ECC = 0;
     RSA = 1;
     HMAC = 2;
     AES = 3;        
   }
-  bool userAuth = 4;  
+  ParentKeyType parentKeyType = 4;
+  enum ParentKeyType {
+    EKECC = 0;
+    EKRSA = 1;      
+  }  
   repeated PCRS pcrs = 5;  
   Key key = 6;
   repeated bytes authValue = 7;
@@ -40,7 +44,8 @@ message PCRS {
 message Key {
   string name = 1;
   string parentName = 2;
-  bytes dupPub = 3;
-  bytes dupDup = 4;
-  bytes dupSeed = 5;
+  bool emptyAuth = 3;
+  bytes dupPub = 4;
+  bytes dupDup = 5;
+  bytes dupSeed = 6;
 }

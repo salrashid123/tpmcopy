@@ -18,6 +18,7 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
+	"github.com/salrashid123/tpmcopy"
 )
 
 const ()
@@ -138,11 +139,105 @@ func run() int {
 	h.Write(b)
 	digest := h.Sum(nil)
 
+	// construct the policy using the utility in this library
+	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+
+	or_sess, or_cleanup, err := tc.GetSession()
+	if err != nil {
+		fmt.Println(err)
+		return 1
+	}
+	defer or_cleanup()
+
+	/// **or do it manually
+
+	// pa_sess, pa_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	// if err != nil {
+	// 	return 1
+	// }
+	// defer pa_cleanup()
+
+	// _, err = tpm2.PolicyAuthValue{
+	// 	PolicySession: pa_sess.Handle(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// papgd, err := tpm2.PolicyGetDigest{
+	// 	PolicySession: pa_sess.Handle(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+	// err = pa_cleanup()
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// // as the "new parent"
+	// dupselect_sess, dupselect_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	// if err != nil {
+	// 	return 1
+	// }
+	// defer dupselect_cleanup()
+
+	// _, err = tpm2.PolicyDuplicationSelect{
+	// 	PolicySession: dupselect_sess.Handle(),
+	// 	NewParentName: primaryKey.Name,
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// // calculate the digest
+	// dupselpgd, err := tpm2.PolicyGetDigest{
+	// 	PolicySession: dupselect_sess.Handle(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+	// err = dupselect_cleanup()
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// // now create an OR session with the two above policies above
+
+	// //or_sess, or_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+
+	// or_sess, or_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Auth([]byte(*password))}...)
+
+	// if err != nil {
+	// 	return 1
+	// }
+	// defer or_cleanup()
+
+	// _, err = tpm2.PolicyAuthValue{
+	// 	PolicySession: or_sess.Handle(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return 1
+	// }
+
+	// _, err = tpm2.PolicyOr{
+	// 	PolicySession: or_sess.Handle(),
+	// 	PHashList:     tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{papgd.PolicyDigest, dupselpgd.PolicyDigest}},
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+
 	sign := tpm2.Sign{
 		KeyHandle: tpm2.AuthHandle{
 			Handle: rsaKey.ObjectHandle,
 			Name:   rsaKey.Name,
-			Auth:   tpm2.PasswordAuth([]byte(*password)),
+			Auth:   or_sess, // tpm2.PasswordAuth([]byte(*password)),
 		},
 		Digest: tpm2.TPM2BDigest{
 			Buffer: digest[:],

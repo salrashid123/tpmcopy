@@ -73,12 +73,58 @@ func (Secret_KeyType) EnumDescriptor() ([]byte, []int) {
 	return file_duplicatepb_wrap_proto_rawDescGZIP(), []int{0, 0}
 }
 
+type Secret_ParentKeyType int32
+
+const (
+	Secret_EKECC Secret_ParentKeyType = 0
+	Secret_EKRSA Secret_ParentKeyType = 1
+)
+
+// Enum value maps for Secret_ParentKeyType.
+var (
+	Secret_ParentKeyType_name = map[int32]string{
+		0: "EKECC",
+		1: "EKRSA",
+	}
+	Secret_ParentKeyType_value = map[string]int32{
+		"EKECC": 0,
+		"EKRSA": 1,
+	}
+)
+
+func (x Secret_ParentKeyType) Enum() *Secret_ParentKeyType {
+	p := new(Secret_ParentKeyType)
+	*p = x
+	return p
+}
+
+func (x Secret_ParentKeyType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Secret_ParentKeyType) Descriptor() protoreflect.EnumDescriptor {
+	return file_duplicatepb_wrap_proto_enumTypes[1].Descriptor()
+}
+
+func (Secret_ParentKeyType) Type() protoreflect.EnumType {
+	return &file_duplicatepb_wrap_proto_enumTypes[1]
+}
+
+func (x Secret_ParentKeyType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Secret_ParentKeyType.Descriptor instead.
+func (Secret_ParentKeyType) EnumDescriptor() ([]byte, []int) {
+	return file_duplicatepb_wrap_proto_rawDescGZIP(), []int{0, 1}
+}
+
 type Secret struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Version       int32                  `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
 	Type          Secret_KeyType         `protobuf:"varint,3,opt,name=type,proto3,enum=duplicatepb.Secret_KeyType" json:"type,omitempty"`
-	UserAuth      bool                   `protobuf:"varint,4,opt,name=userAuth,proto3" json:"userAuth,omitempty"`
+	ParentKeyType Secret_ParentKeyType   `protobuf:"varint,4,opt,name=parentKeyType,proto3,enum=duplicatepb.Secret_ParentKeyType" json:"parentKeyType,omitempty"`
 	Pcrs          []*PCRS                `protobuf:"bytes,5,rep,name=pcrs,proto3" json:"pcrs,omitempty"`
 	Key           *Key                   `protobuf:"bytes,6,opt,name=key,proto3" json:"key,omitempty"`
 	AuthValue     [][]byte               `protobuf:"bytes,7,rep,name=authValue,proto3" json:"authValue,omitempty"`
@@ -137,11 +183,11 @@ func (x *Secret) GetType() Secret_KeyType {
 	return Secret_ECC
 }
 
-func (x *Secret) GetUserAuth() bool {
+func (x *Secret) GetParentKeyType() Secret_ParentKeyType {
 	if x != nil {
-		return x.UserAuth
+		return x.ParentKeyType
 	}
-	return false
+	return Secret_EKECC
 }
 
 func (x *Secret) GetPcrs() []*PCRS {
@@ -221,9 +267,10 @@ type Key struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	ParentName    string                 `protobuf:"bytes,2,opt,name=parentName,proto3" json:"parentName,omitempty"`
-	DupPub        []byte                 `protobuf:"bytes,3,opt,name=dupPub,proto3" json:"dupPub,omitempty"`
-	DupDup        []byte                 `protobuf:"bytes,4,opt,name=dupDup,proto3" json:"dupDup,omitempty"`
-	DupSeed       []byte                 `protobuf:"bytes,5,opt,name=dupSeed,proto3" json:"dupSeed,omitempty"`
+	EmptyAuth     bool                   `protobuf:"varint,3,opt,name=emptyAuth,proto3" json:"emptyAuth,omitempty"`
+	DupPub        []byte                 `protobuf:"bytes,4,opt,name=dupPub,proto3" json:"dupPub,omitempty"`
+	DupDup        []byte                 `protobuf:"bytes,5,opt,name=dupDup,proto3" json:"dupDup,omitempty"`
+	DupSeed       []byte                 `protobuf:"bytes,6,opt,name=dupSeed,proto3" json:"dupSeed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -272,6 +319,13 @@ func (x *Key) GetParentName() string {
 	return ""
 }
 
+func (x *Key) GetEmptyAuth() bool {
+	if x != nil {
+		return x.EmptyAuth
+	}
+	return false
+}
+
 func (x *Key) GetDupPub() []byte {
 	if x != nil {
 		return x.DupPub
@@ -297,12 +351,12 @@ var File_duplicatepb_wrap_proto protoreflect.FileDescriptor
 
 const file_duplicatepb_wrap_proto_rawDesc = "" +
 	"\n" +
-	"\x16duplicatepb/wrap.proto\x12\vduplicatepb\"\x9c\x02\n" +
+	"\x16duplicatepb/wrap.proto\x12\vduplicatepb\"\xf0\x02\n" +
 	"\x06Secret\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x05R\aversion\x12/\n" +
-	"\x04type\x18\x03 \x01(\x0e2\x1b.duplicatepb.Secret.KeyTypeR\x04type\x12\x1a\n" +
-	"\buserAuth\x18\x04 \x01(\bR\buserAuth\x12%\n" +
+	"\x04type\x18\x03 \x01(\x0e2\x1b.duplicatepb.Secret.KeyTypeR\x04type\x12G\n" +
+	"\rparentKeyType\x18\x04 \x01(\x0e2!.duplicatepb.Secret.ParentKeyTypeR\rparentKeyType\x12%\n" +
 	"\x04pcrs\x18\x05 \x03(\v2\x11.duplicatepb.PCRSR\x04pcrs\x12\"\n" +
 	"\x03key\x18\x06 \x01(\v2\x10.duplicatepb.KeyR\x03key\x12\x1c\n" +
 	"\tauthValue\x18\a \x03(\fR\tauthValue\".\n" +
@@ -310,18 +364,22 @@ const file_duplicatepb_wrap_proto_rawDesc = "" +
 	"\x03ECC\x10\x00\x12\a\n" +
 	"\x03RSA\x10\x01\x12\b\n" +
 	"\x04HMAC\x10\x02\x12\a\n" +
-	"\x03AES\x10\x03\".\n" +
+	"\x03AES\x10\x03\"%\n" +
+	"\rParentKeyType\x12\t\n" +
+	"\x05EKECC\x10\x00\x12\t\n" +
+	"\x05EKRSA\x10\x01\".\n" +
 	"\x04PCRS\x12\x10\n" +
 	"\x03pcr\x18\x01 \x01(\x05R\x03pcr\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"\x83\x01\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"\xa1\x01\n" +
 	"\x03Key\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1e\n" +
 	"\n" +
 	"parentName\x18\x02 \x01(\tR\n" +
-	"parentName\x12\x16\n" +
-	"\x06dupPub\x18\x03 \x01(\fR\x06dupPub\x12\x16\n" +
-	"\x06dupDup\x18\x04 \x01(\fR\x06dupDup\x12\x18\n" +
-	"\adupSeed\x18\x05 \x01(\fR\adupSeedB3Z1github.com/salrashid123/go-tpm-wrapping/tpmwrappbb\x06proto3"
+	"parentName\x12\x1c\n" +
+	"\temptyAuth\x18\x03 \x01(\bR\temptyAuth\x12\x16\n" +
+	"\x06dupPub\x18\x04 \x01(\fR\x06dupPub\x12\x16\n" +
+	"\x06dupDup\x18\x05 \x01(\fR\x06dupDup\x12\x18\n" +
+	"\adupSeed\x18\x06 \x01(\fR\adupSeedB3Z1github.com/salrashid123/go-tpm-wrapping/tpmwrappbb\x06proto3"
 
 var (
 	file_duplicatepb_wrap_proto_rawDescOnce sync.Once
@@ -335,23 +393,25 @@ func file_duplicatepb_wrap_proto_rawDescGZIP() []byte {
 	return file_duplicatepb_wrap_proto_rawDescData
 }
 
-var file_duplicatepb_wrap_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_duplicatepb_wrap_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_duplicatepb_wrap_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_duplicatepb_wrap_proto_goTypes = []any{
-	(Secret_KeyType)(0), // 0: duplicatepb.Secret.KeyType
-	(*Secret)(nil),      // 1: duplicatepb.Secret
-	(*PCRS)(nil),        // 2: duplicatepb.PCRS
-	(*Key)(nil),         // 3: duplicatepb.Key
+	(Secret_KeyType)(0),       // 0: duplicatepb.Secret.KeyType
+	(Secret_ParentKeyType)(0), // 1: duplicatepb.Secret.ParentKeyType
+	(*Secret)(nil),            // 2: duplicatepb.Secret
+	(*PCRS)(nil),              // 3: duplicatepb.PCRS
+	(*Key)(nil),               // 4: duplicatepb.Key
 }
 var file_duplicatepb_wrap_proto_depIdxs = []int32{
 	0, // 0: duplicatepb.Secret.type:type_name -> duplicatepb.Secret.KeyType
-	2, // 1: duplicatepb.Secret.pcrs:type_name -> duplicatepb.PCRS
-	3, // 2: duplicatepb.Secret.key:type_name -> duplicatepb.Key
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	1, // 1: duplicatepb.Secret.parentKeyType:type_name -> duplicatepb.Secret.ParentKeyType
+	3, // 2: duplicatepb.Secret.pcrs:type_name -> duplicatepb.PCRS
+	4, // 3: duplicatepb.Secret.key:type_name -> duplicatepb.Key
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_duplicatepb_wrap_proto_init() }
@@ -364,7 +424,7 @@ func file_duplicatepb_wrap_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_duplicatepb_wrap_proto_rawDesc), len(file_duplicatepb_wrap_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,

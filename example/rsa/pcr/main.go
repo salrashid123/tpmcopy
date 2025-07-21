@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
+	tpmcopy "github.com/salrashid123/tpmcopy"
 )
 
 const ()
@@ -137,96 +138,116 @@ func run() int {
 	h.Write(b)
 	digest := h.Sum(nil)
 
-	pcr_sess, pcr_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-	if err != nil {
-		return 1
-	}
-	defer pcr_cleanup()
+	// use utility function
 
-	_, err = tpm2.PolicyPCR{
-		PolicySession: pcr_sess.Handle(),
-		Pcrs: tpm2.TPMLPCRSelection{
-			PCRSelections: []tpm2.TPMSPCRSelection{
-				{
-					Hash:      tpm2.TPMAlgSHA256,
-					PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
-				},
-			},
+	se, err := tpmcopy.NewPCRAndDuplicateSelectSession(rwr, []tpm2.TPMSPCRSelection{
+		{
+			Hash:      tpm2.TPMAlgSHA256,
+			PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
 		},
-	}.Execute(rwr)
+	}, nil, primaryKey.Name)
 	if err != nil {
+		fmt.Println(err)
 		return 1
 	}
-
-	pcrpgd, err := tpm2.PolicyGetDigest{
-		PolicySession: pcr_sess.Handle(),
-	}.Execute(rwr)
-	if err != nil {
-		return 1
-	}
-	err = pcr_cleanup()
-	if err != nil {
-		return 1
-	}
-
-	// create another real session with the PolicyDuplicationSelect and remember to specify the EK
-	// as the "new parent"
-	dupselect_sess, dupselect_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-	if err != nil {
-		return 1
-	}
-	defer dupselect_cleanup()
-
-	_, err = tpm2.PolicyDuplicationSelect{
-		PolicySession: dupselect_sess.Handle(),
-		NewParentName: primaryKey.Name,
-	}.Execute(rwr)
-	if err != nil {
-		return 1
-	}
-
-	// calculate the digest
-	dupselpgd, err := tpm2.PolicyGetDigest{
-		PolicySession: dupselect_sess.Handle(),
-	}.Execute(rwr)
-	if err != nil {
-		return 1
-	}
-	err = dupselect_cleanup()
-	if err != nil {
-		return 1
-	}
-
-	// now create an OR session with the two above policies above
-
-	or_sess, or_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	or_sess, or_cleanup, err := se.GetSession()
 	if err != nil {
 		return 1
 	}
 	defer or_cleanup()
 
-	_, err = tpm2.PolicyPCR{
-		PolicySession: or_sess.Handle(),
-		Pcrs: tpm2.TPMLPCRSelection{
-			PCRSelections: []tpm2.TPMSPCRSelection{
-				{
-					Hash:      tpm2.TPMAlgSHA256,
-					PCRSelect: tpm2.PCClientCompatible.PCRs(*pcr),
-				},
-			},
-		},
-	}.Execute(rwr)
-	if err != nil {
-		return 1
-	}
+	// or construct it manually:
 
-	_, err = tpm2.PolicyOr{
-		PolicySession: or_sess.Handle(),
-		PHashList:     tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{pcrpgd.PolicyDigest, dupselpgd.PolicyDigest}},
-	}.Execute(rwr)
-	if err != nil {
-		return 1
-	}
+	// pcr_sess, pcr_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	// if err != nil {
+	// 	return 1
+	// }
+	// defer pcr_cleanup()
+
+	// _, err = tpm2.PolicyPCR{
+	// 	PolicySession: pcr_sess.Handle(),
+	// 	Pcrs: tpm2.TPMLPCRSelection{
+	// 		PCRSelections: []tpm2.TPMSPCRSelection{
+	// 			{
+	// 				Hash:      tpm2.TPMAlgSHA256,
+	// 				PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
+	// 			},
+	// 		},
+	// 	},
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// pcrpgd, err := tpm2.PolicyGetDigest{
+	// 	PolicySession: pcr_sess.Handle(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+	// err = pcr_cleanup()
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// // create another real session with the PolicyDuplicationSelect and remember to specify the EK
+	// // as the "new parent"
+	// dupselect_sess, dupselect_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	// if err != nil {
+	// 	return 1
+	// }
+	// defer dupselect_cleanup()
+
+	// _, err = tpm2.PolicyDuplicationSelect{
+	// 	PolicySession: dupselect_sess.Handle(),
+	// 	NewParentName: primaryKey.Name,
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// // calculate the digest
+	// dupselpgd, err := tpm2.PolicyGetDigest{
+	// 	PolicySession: dupselect_sess.Handle(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+	// err = dupselect_cleanup()
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// // now create an OR session with the two above policies above
+
+	// or_sess, or_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	// if err != nil {
+	// 	return 1
+	// }
+	// defer or_cleanup()
+
+	// _, err = tpm2.PolicyPCR{
+	// 	PolicySession: or_sess.Handle(),
+	// 	Pcrs: tpm2.TPMLPCRSelection{
+	// 		PCRSelections: []tpm2.TPMSPCRSelection{
+	// 			{
+	// 				Hash:      tpm2.TPMAlgSHA256,
+	// 				PCRSelect: tpm2.PCClientCompatible.PCRs(*pcr),
+	// 			},
+	// 		},
+	// 	},
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
+
+	// _, err = tpm2.PolicyOr{
+	// 	PolicySession: or_sess.Handle(),
+	// 	PHashList:     tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{pcrpgd.PolicyDigest, dupselpgd.PolicyDigest}},
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	return 1
+	// }
 
 	sign := tpm2.Sign{
 		KeyHandle: tpm2.AuthHandle{
