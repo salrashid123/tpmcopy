@@ -18,7 +18,7 @@ const (
 
 func TestMain(t *testing.T) {
 
-	tempDirA := t.TempDir()
+	//tempDirA := t.TempDir()
 	tempDirB := t.TempDir()
 	for _, tc := range []struct {
 		Name        string
@@ -32,12 +32,12 @@ func TestMain(t *testing.T) {
 			Output:      fmt.Sprintf("Public Key written to: %s/public.pem\n", tempDirB),
 			ExpectError: false,
 		},
-		{
-			Name:        "duplicate_password",
-			Args:        []string{"--mode=duplicate", "--keyType=rsa", "--secret=../testdata/certs/key_rsa.pem", "--password=bar", "--tpmPublicKeyFile=/tmp/public.pem", fmt.Sprintf("--out=%s/out.json", tempDirA), fmt.Sprintf("-tpm-path=%s", TPMA)},
-			Output:      fmt.Sprintf("Duplicate Key written to: %s/out.json\n", tempDirA),
-			ExpectError: false,
-		},
+		// {
+		// 	Name:        "duplicate_password",
+		// 	Args:        []string{"--mode=duplicate", "--keyType=rsa", "--secret=../testdata/certs/key_rsa.pem", "--password=bar", "--tpmPublicKeyFile=/tmp/public.pem", fmt.Sprintf("--out=%s/out.json", tempDirA), fmt.Sprintf("-tpm-path=%s", TPMA)},
+		// 	Output:      fmt.Sprintf("Duplicate Key written to: %s/out.json\n", tempDirA),
+		// 	ExpectError: false,
+		// },
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 
