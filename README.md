@@ -666,4 +666,8 @@ Populate the `keyfile.TPMKey.AuthPolicy  []*TPMAuthPolicy[]` parameter with the 
 
 * [Reconstruct Policy using command parameters](https://github.com/salrashid123/tpm2/tree/master/policy_gen)
 
+Direct local duplicate creation:
+
+* [Duplicate and Transfer without local TPM on source](https://github.com/salrashid123/tpm2/tree/master/tpm2_duplicate_direct)
+
 ---
