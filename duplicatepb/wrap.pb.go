@@ -126,8 +126,9 @@ type Secret struct {
 	Type          Secret_KeyType         `protobuf:"varint,3,opt,name=type,proto3,enum=duplicatepb.Secret_KeyType" json:"type,omitempty"`
 	ParentKeyType Secret_ParentKeyType   `protobuf:"varint,4,opt,name=parentKeyType,proto3,enum=duplicatepb.Secret_ParentKeyType" json:"parentKeyType,omitempty"`
 	Pcrs          []*PCRS                `protobuf:"bytes,5,rep,name=pcrs,proto3" json:"pcrs,omitempty"`
-	Key           *Key                   `protobuf:"bytes,6,opt,name=key,proto3" json:"key,omitempty"`
+	Key           string                 `protobuf:"bytes,6,opt,name=key,proto3" json:"key,omitempty"`
 	AuthValue     [][]byte               `protobuf:"bytes,7,rep,name=authValue,proto3" json:"authValue,omitempty"`
+	ParentName    string                 `protobuf:"bytes,8,opt,name=parentName,proto3" json:"parentName,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,11 +198,11 @@ func (x *Secret) GetPcrs() []*PCRS {
 	return nil
 }
 
-func (x *Secret) GetKey() *Key {
+func (x *Secret) GetKey() string {
 	if x != nil {
 		return x.Key
 	}
-	return nil
+	return ""
 }
 
 func (x *Secret) GetAuthValue() [][]byte {
@@ -209,6 +210,13 @@ func (x *Secret) GetAuthValue() [][]byte {
 		return x.AuthValue
 	}
 	return nil
+}
+
+func (x *Secret) GetParentName() string {
+	if x != nil {
+		return x.ParentName
+	}
+	return ""
 }
 
 type PCRS struct {
@@ -263,103 +271,22 @@ func (x *PCRS) GetValue() []byte {
 	return nil
 }
 
-type Key struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	ParentName    string                 `protobuf:"bytes,2,opt,name=parentName,proto3" json:"parentName,omitempty"`
-	EmptyAuth     bool                   `protobuf:"varint,3,opt,name=emptyAuth,proto3" json:"emptyAuth,omitempty"`
-	DupPub        []byte                 `protobuf:"bytes,4,opt,name=dupPub,proto3" json:"dupPub,omitempty"`
-	DupDup        []byte                 `protobuf:"bytes,5,opt,name=dupDup,proto3" json:"dupDup,omitempty"`
-	DupSeed       []byte                 `protobuf:"bytes,6,opt,name=dupSeed,proto3" json:"dupSeed,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Key) Reset() {
-	*x = Key{}
-	mi := &file_duplicatepb_wrap_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Key) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Key) ProtoMessage() {}
-
-func (x *Key) ProtoReflect() protoreflect.Message {
-	mi := &file_duplicatepb_wrap_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Key.ProtoReflect.Descriptor instead.
-func (*Key) Descriptor() ([]byte, []int) {
-	return file_duplicatepb_wrap_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *Key) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *Key) GetParentName() string {
-	if x != nil {
-		return x.ParentName
-	}
-	return ""
-}
-
-func (x *Key) GetEmptyAuth() bool {
-	if x != nil {
-		return x.EmptyAuth
-	}
-	return false
-}
-
-func (x *Key) GetDupPub() []byte {
-	if x != nil {
-		return x.DupPub
-	}
-	return nil
-}
-
-func (x *Key) GetDupDup() []byte {
-	if x != nil {
-		return x.DupDup
-	}
-	return nil
-}
-
-func (x *Key) GetDupSeed() []byte {
-	if x != nil {
-		return x.DupSeed
-	}
-	return nil
-}
-
 var File_duplicatepb_wrap_proto protoreflect.FileDescriptor
 
 const file_duplicatepb_wrap_proto_rawDesc = "" +
 	"\n" +
-	"\x16duplicatepb/wrap.proto\x12\vduplicatepb\"\xf0\x02\n" +
+	"\x16duplicatepb/wrap.proto\x12\vduplicatepb\"\xfe\x02\n" +
 	"\x06Secret\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x05R\aversion\x12/\n" +
 	"\x04type\x18\x03 \x01(\x0e2\x1b.duplicatepb.Secret.KeyTypeR\x04type\x12G\n" +
 	"\rparentKeyType\x18\x04 \x01(\x0e2!.duplicatepb.Secret.ParentKeyTypeR\rparentKeyType\x12%\n" +
-	"\x04pcrs\x18\x05 \x03(\v2\x11.duplicatepb.PCRSR\x04pcrs\x12\"\n" +
-	"\x03key\x18\x06 \x01(\v2\x10.duplicatepb.KeyR\x03key\x12\x1c\n" +
-	"\tauthValue\x18\a \x03(\fR\tauthValue\".\n" +
+	"\x04pcrs\x18\x05 \x03(\v2\x11.duplicatepb.PCRSR\x04pcrs\x12\x10\n" +
+	"\x03key\x18\x06 \x01(\tR\x03key\x12\x1c\n" +
+	"\tauthValue\x18\a \x03(\fR\tauthValue\x12\x1e\n" +
+	"\n" +
+	"parentName\x18\b \x01(\tR\n" +
+	"parentName\".\n" +
 	"\aKeyType\x12\a\n" +
 	"\x03ECC\x10\x00\x12\a\n" +
 	"\x03RSA\x10\x01\x12\b\n" +
@@ -370,16 +297,7 @@ const file_duplicatepb_wrap_proto_rawDesc = "" +
 	"\x05EKRSA\x10\x01\".\n" +
 	"\x04PCRS\x12\x10\n" +
 	"\x03pcr\x18\x01 \x01(\x05R\x03pcr\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"\xa1\x01\n" +
-	"\x03Key\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1e\n" +
-	"\n" +
-	"parentName\x18\x02 \x01(\tR\n" +
-	"parentName\x12\x1c\n" +
-	"\temptyAuth\x18\x03 \x01(\bR\temptyAuth\x12\x16\n" +
-	"\x06dupPub\x18\x04 \x01(\fR\x06dupPub\x12\x16\n" +
-	"\x06dupDup\x18\x05 \x01(\fR\x06dupDup\x12\x18\n" +
-	"\adupSeed\x18\x06 \x01(\fR\adupSeedB3Z1github.com/salrashid123/go-tpm-wrapping/tpmwrappbb\x06proto3"
+	"\x05value\x18\x02 \x01(\fR\x05valueB3Z1github.com/salrashid123/go-tpm-wrapping/tpmwrappbb\x06proto3"
 
 var (
 	file_duplicatepb_wrap_proto_rawDescOnce sync.Once
@@ -394,24 +312,22 @@ func file_duplicatepb_wrap_proto_rawDescGZIP() []byte {
 }
 
 var file_duplicatepb_wrap_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_duplicatepb_wrap_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_duplicatepb_wrap_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_duplicatepb_wrap_proto_goTypes = []any{
 	(Secret_KeyType)(0),       // 0: duplicatepb.Secret.KeyType
 	(Secret_ParentKeyType)(0), // 1: duplicatepb.Secret.ParentKeyType
 	(*Secret)(nil),            // 2: duplicatepb.Secret
 	(*PCRS)(nil),              // 3: duplicatepb.PCRS
-	(*Key)(nil),               // 4: duplicatepb.Key
 }
 var file_duplicatepb_wrap_proto_depIdxs = []int32{
 	0, // 0: duplicatepb.Secret.type:type_name -> duplicatepb.Secret.KeyType
 	1, // 1: duplicatepb.Secret.parentKeyType:type_name -> duplicatepb.Secret.ParentKeyType
 	3, // 2: duplicatepb.Secret.pcrs:type_name -> duplicatepb.PCRS
-	4, // 3: duplicatepb.Secret.key:type_name -> duplicatepb.Key
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_duplicatepb_wrap_proto_init() }
@@ -425,7 +341,7 @@ func file_duplicatepb_wrap_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_duplicatepb_wrap_proto_rawDesc), len(file_duplicatepb_wrap_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   3,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

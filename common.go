@@ -28,6 +28,10 @@ func OpenTPM(path string) (io.ReadWriteCloser, error) {
 
 var ()
 
+const (
+	defaultPersistentHandle = uint32(0x81008000)
+)
+
 func getPCRMap(algo tpm2.TPMAlgID, pcrMap map[uint][]byte) (map[uint][]byte, []uint, []byte, error) {
 
 	var hsh hash.Hash

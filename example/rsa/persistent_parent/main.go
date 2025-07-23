@@ -19,6 +19,9 @@ import (
 	tpmcopy "github.com/salrashid123/tpmcopy"
 )
 
+// sample to show how to initialize and use the key if the parent is referenced as
+// a persistent handle
+
 const ()
 
 var (

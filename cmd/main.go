@@ -25,7 +25,10 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const ()
+const (
+	// pg 14: https://trustedcomputinggroup.org/wp-content/uploads/RegistryOfReservedTPM2HandlesAndLocalities_v1p1_pub.pdf
+	defaultPersistentHandle = 0x81008000
+)
 
 var (
 	help = flag.Bool("help", false, "print usage")
@@ -40,7 +43,8 @@ var (
 	pcrValues             = flag.String("pcrValues", "", "PCR Bound value (increasing order, comma separated)")
 	secret                = flag.String("secret", "", "File with secret to duplicate (rsa | ecc | hex encoded symmetric key or hmac pass)")
 
-	parent = flag.Uint("parent", 0, "parent Handle to encode the TPM PEM key file against (default TPMRHEndorsement.RSAEKTemplate transient)")
+	parent            = flag.Uint("parent", 0, "parent persistentHandle to create and encode the TPM PEM key file against (default 0x81018000 permanent)")
+	useExistingParent = flag.Bool("useExistingParent", false, "Use an existing persistentHandle Parent (default: false)")
 
 	out     = flag.String("out", "/tmp/out.json", "File to write the duplicate to")
 	in      = flag.String("in", "/tmp/out.json", "FileName with the key to import")
@@ -511,15 +515,20 @@ func run() int {
 			}
 
 		default:
-			fmt.Fprintf(os.Stdout, " unknown key type %s", *keyType)
+			fmt.Fprintf(os.Stdout, " unknown --keyType please specify rsa|ecc|aes|hmac\n")
 			return 1
+		}
+
+		kParent := tpm2.TPMRHOwner
+		if *parent == 0 {
+			kParent = tpm2.TPMHandle(*parent)
 		}
 
 		wrappb, err := tpmcopy.Duplicate(&tpmcopy.TPMConfig{
 			TPMDevice:               rwc,
 			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle,
 			Ownerpw:                 []byte(*ownerpw),
-		}, ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, pcrMap)
+		}, ekPububFromPEMTemplate, kt, pkt, kParent, *keyName, dupKeyTemplate, sens2B, pcrMap)
 		if err != nil {
 			fmt.Fprintf(os.Stdout, "error duplicating %v", err)
 			return 1
@@ -545,8 +554,11 @@ func run() int {
 		}
 
 		var parentHandle tpm2.TPMHandle
-		if *parent != 0 {
-			// uint(tpm2.TPMRHOwner.HandleValue())
+		if *useExistingParent {
+			if *parent == 0 {
+				fmt.Fprintf(os.Stdout, "--parent= cannot be 0 if useExistingParent is set")
+				return 1
+			}
 			parentHandle = tpm2.TPMHandle(uint32(*parent))
 		} else {
 			var t tpm2.TPMTPublic
@@ -575,11 +587,45 @@ func run() int {
 				}
 				_, err := flushContextCmd.Execute(rwr)
 				if err != nil {
-					fmt.Fprintf(os.Stdout, "can't close TPM %v", err)
+					fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
 				}
 			}()
 
-			parentHandle = cCreateEK.ObjectHandle
+			if *parent == 0 {
+				*parent = defaultPersistentHandle
+			}
+			kp, err := tpm2.ReadPublic{
+				ObjectHandle: tpm2.TPMHandle(uint32(*parent)),
+			}.Execute(rwr)
+			if err == nil {
+				fmt.Fprintf(os.Stdout, "Evicting existing handle 0x%v\n", strconv.FormatUint(uint64(*parent), 16))
+				_, err = tpm2.EvictControl{
+					Auth: tpm2.TPMRHOwner,
+					ObjectHandle: &tpm2.NamedHandle{
+						Handle: tpm2.TPMIDHPersistent(uint32(*parent)),
+						Name:   kp.Name,
+					},
+					PersistentHandle: tpm2.TPMHandle(uint32(*parent)),
+				}.Execute(rwr)
+				if err != nil {
+					fmt.Fprintf(os.Stdout, "error evicting exsting persistentHandle: %v", err)
+					return 1
+				}
+			}
+
+			_, err = tpm2.EvictControl{
+				Auth: tpm2.TPMRHOwner,
+				ObjectHandle: &tpm2.NamedHandle{
+					Handle: cCreateEK.ObjectHandle,
+					Name:   cCreateEK.Name,
+				},
+				PersistentHandle: tpm2.TPMHandle(uint32(*parent)),
+			}.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "Error creating persistentHandle %v\n", err)
+				return 1
+			}
+			parentHandle = tpm2.TPMHandle(*parent)
 		}
 
 		bt, err := os.ReadFile(*in)
@@ -592,7 +638,7 @@ func run() int {
 
 		err = protojson.Unmarshal(bt, &k)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "failed to wrap proto Key: %v", err)
+			fmt.Fprintf(os.Stdout, "failed to unmarshall proto Key: %v", err)
 			return 1
 		}
 
@@ -601,7 +647,7 @@ func run() int {
 			Ownerpw:                 []byte(*ownerpw),
 			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle}, parentHandle, k)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "failed to wrap proto Key: %v", err)
+			fmt.Fprintf(os.Stdout, "failed to import Key: %v", err)
 			return 1
 		}
 		kfb := new(bytes.Buffer)

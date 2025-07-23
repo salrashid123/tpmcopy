@@ -1,6 +1,7 @@
 package tpmcopy
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/hex"
@@ -111,7 +112,7 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 }
 
 // create a duplicate of the given key type and template
-func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, parentKeyType duplicatepb.Secret_ParentKeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
+func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, parentKeyType duplicatepb.Secret_ParentKeyType, parentHandle tpm2.TPMHandle, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
 
 	if h.SessionEncryptionHandle == 0 {
 		return duplicatepb.Secret{}, fmt.Errorf("error please specify a sessionEncryptionHandle")
@@ -621,19 +622,32 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 	// todo: fill in AuthValue
 	// https://github.com/salrashid123/tpm2/tree/master/policy_gen
 
+	kparent := tpm2.TPMRHOwner
+
+	if parentHandle != 0 {
+		kparent = tpm2.TPMRHOwner
+	}
+	tkey := keyfile.TPMKey{
+		Keytype:   keyfile.OIDImportableKey,
+		EmptyAuth: true,
+		Parent:    kparent,
+		Secret:    tpm2.TPM2BEncryptedSecret{Buffer: dupSeed},
+		Privkey:   tpm2.TPM2BPrivate{Buffer: dupDup},
+		Pubkey:    tpm2.BytesAs2B[tpm2.TPMTPublic](dupPub),
+	}
+	keyFileBytes := new(bytes.Buffer)
+	err = keyfile.Encode(keyFileBytes, &tkey)
+	if err != nil {
+		return duplicatepb.Secret{}, fmt.Errorf("error encoding keyfile %v", err)
+	}
 	return duplicatepb.Secret{
 		Name:          keyName,
 		Version:       1,
 		Type:          keyType,
 		ParentKeyType: parentKeyType,
-		Key: &duplicatepb.Key{
-			ParentName: hex.EncodeToString(ekName.Buffer),
-			DupPub:     dupPub,
-			DupSeed:    dupSeed,
-			DupDup:     dupDup,
-			EmptyAuth:  true,
-		},
-		Pcrs: pcv,
+		ParentName:    hex.EncodeToString(ekName.Buffer),
+		Key:           keyFileBytes.String(),
+		Pcrs:          pcv,
 	}, nil
 
 }
@@ -686,8 +700,8 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (key
 		return keyfile.TPMKey{}, fmt.Errorf("error reading  handle public %v", err)
 	}
 
-	if secret.Key.ParentName != hex.EncodeToString(ekPub.Name.Buffer) {
-		return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", secret.Key.ParentName, hex.EncodeToString(ekPub.Name.Buffer))
+	if secret.ParentName != hex.EncodeToString(ekPub.Name.Buffer) {
+		return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", secret.ParentName, hex.EncodeToString(ekPub.Name.Buffer))
 	}
 
 	/// import
@@ -711,9 +725,9 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (key
 		return keyfile.TPMKey{}, fmt.Errorf("error setting policy PolicyDuplicationSelect %v", err)
 	}
 
-	dupPub, err := tpm2.Unmarshal[tpm2.TPMTPublic](secret.Key.DupPub)
+	kf, err := keyfile.Decode([]byte(secret.Key))
 	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("unmarshal public %v", err)
+		return keyfile.TPMKey{}, fmt.Errorf("unmarshal secret.key %v", err)
 	}
 
 	importCmd := tpm2.Import{
@@ -722,12 +736,12 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (key
 			Name:   ekPub.Name,
 			Auth:   import_sess,
 		},
-		ObjectPublic: tpm2.New2B(*dupPub),
+		ObjectPublic: kf.Pubkey,
 		Duplicate: tpm2.TPM2BPrivate{
-			Buffer: secret.Key.DupDup,
+			Buffer: kf.Privkey.Buffer,
 		},
 		InSymSeed: tpm2.TPM2BEncryptedSecret{
-			Buffer: secret.Key.DupSeed,
+			Buffer: kf.Secret.Buffer,
 		},
 	}
 
@@ -736,13 +750,12 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (key
 		return keyfile.TPMKey{}, fmt.Errorf("...can't run import dup %v", err)
 	}
 
-	kf := keyfile.NewTPMKey(
+	kfn := keyfile.NewTPMKey(
 		keyfile.OIDLoadableKey,
-		tpm2.New2B(*dupPub),
+		importCmd.ObjectPublic,
 		importResp.OutPrivate,
 		keyfile.WithParent(handle), //(tpm2.TPMRHOwner), // the parent isnt really the owner
+		keyfile.WithAuthPolicy(nil),
 	)
-
-	kf.EmptyAuth = secret.Key.EmptyAuth
-	return *kf, nil
+	return *kfn, nil
 }

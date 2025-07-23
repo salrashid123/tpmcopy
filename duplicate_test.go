@@ -28,11 +28,8 @@ import (
 )
 
 const (
-	maxInputBuffer = 1024
-)
-
-const (
-	persistentHandle = uint32(0x81018000)
+	maxInputBuffer  = 1024
+	maxDigestBuffer = 1024
 )
 
 var ()
@@ -306,7 +303,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 			s, err := Duplicate(&TPMConfig{
 				TPMDevice:               tpmDeviceA,
 				SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-			}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_EKRSA, "", dupKeyTemplate, sens2B, nil)
+			}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_EKRSA, 0, "", dupKeyTemplate, sens2B, nil)
 			// ************************
 			require.NoError(t, err)
 			_, _ = tpm2.FlushContext{
@@ -325,38 +322,6 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 					FlushHandle: sessionEncryptionRspB.ObjectHandle,
 				}.Execute(rwrB)
 			}()
-
-			// set a persistentHandle for the parent
-			//  this is useful for PEM encoded files to load
-			// pubEKB, err := tpm2.ReadPublic{
-			// 	ObjectHandle: ekHandle,
-			// }.Execute(rwrB)
-			// require.NoError(t, err)
-
-			// _, err = tpm2.ReadPublic{
-			// 	ObjectHandle: tpm2.TPMHandle(persistentHandle),
-			// }.Execute(rwrB)
-			// if err == nil {
-			// 	_, err = tpm2.EvictControl{
-			// 		Auth: tpm2.TPMRHOwner,
-			// 		ObjectHandle: &tpm2.NamedHandle{
-			// 			Handle: tpm2.TPMIDHPersistent(persistentHandle),
-			// 			Name:   tpm2.HandleName(tpm2.TPMIDHPersistent(persistentHandle)),
-			// 		},
-			// 		PersistentHandle: tpm2.TPMIDHPersistent(persistentHandle),
-			// 	}.Execute(rwrB)
-			// 	require.NoError(t, err)
-			// }
-
-			// _, err = tpm2.EvictControl{
-			// 	Auth: tpm2.TPMRHOwner,
-			// 	ObjectHandle: &tpm2.NamedHandle{
-			// 		Handle: ekHandle,
-			// 		Name:   pubEKB.Name,
-			// 	},
-			// 	PersistentHandle: tpm2.TPMHandle(persistentHandle),
-			// }.Execute(rwrB)
-			// require.NoError(t, err)
 
 			key, err := Import(&TPMConfig{
 				TPMDevice:               tpmDeviceB,
@@ -592,7 +557,7 @@ func TestImportPersistent(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_EKRSA, "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_EKRSA, 0, "", dupKeyTemplate, sens2B, nil)
 	// ************************
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -620,16 +585,16 @@ func TestImportPersistent(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = tpm2.ReadPublic{
-		ObjectHandle: tpm2.TPMHandle(persistentHandle),
+		ObjectHandle: tpm2.TPMHandle(defaultPersistentHandle),
 	}.Execute(rwrB)
 	if err == nil {
 		_, err = tpm2.EvictControl{
 			Auth: tpm2.TPMRHOwner,
 			ObjectHandle: &tpm2.NamedHandle{
-				Handle: tpm2.TPMIDHPersistent(persistentHandle),
-				Name:   tpm2.HandleName(tpm2.TPMIDHPersistent(persistentHandle)),
+				Handle: tpm2.TPMIDHPersistent(defaultPersistentHandle),
+				Name:   tpm2.HandleName(tpm2.TPMIDHPersistent(defaultPersistentHandle)),
 			},
-			PersistentHandle: tpm2.TPMIDHPersistent(persistentHandle),
+			PersistentHandle: tpm2.TPMIDHPersistent(defaultPersistentHandle),
 		}.Execute(rwrB)
 		require.NoError(t, err)
 	}
@@ -640,14 +605,14 @@ func TestImportPersistent(t *testing.T) {
 			Handle: ekHandle,
 			Name:   pubEKB.Name,
 		},
-		PersistentHandle: tpm2.TPMHandle(persistentHandle),
+		PersistentHandle: tpm2.TPMHandle(defaultPersistentHandle),
 	}.Execute(rwrB)
 	require.NoError(t, err)
 
 	key, err := Import(&TPMConfig{
 		TPMDevice:               tpmDeviceB,
 		SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
-	}, tpm2.TPMHandle(persistentHandle), s)
+	}, tpm2.TPMHandle(defaultPersistentHandle), s)
 	require.NoError(t, err)
 
 	_, _ = tpm2.FlushContext{
@@ -922,7 +887,7 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 			s, err := Duplicate(&TPMConfig{
 				TPMDevice:               tpmDeviceA,
 				SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-			}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_EKRSA, "", dupKeyTemplate, sens2B, pcrMap)
+			}, ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_EKRSA, 0, "", dupKeyTemplate, sens2B, pcrMap)
 
 			// ************************
 
@@ -1231,8 +1196,8 @@ func TestDuplicateECC(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_ECC, duplicatepb.Secret_EKRSA, "", dupKeyTemplate, sens2B, nil)
-	// ************************
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_ECC, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultPersistentHandle), "", dupKeyTemplate, sens2B, nil)
+
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
 		FlushHandle: sessionEncryptionRspA.ObjectHandle,
@@ -1525,7 +1490,7 @@ func TestDuplicateAES(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_AES, duplicatepb.Secret_EKRSA, "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_AES, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultPersistentHandle), "", dupKeyTemplate, sens2B, nil)
 
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -1646,8 +1611,6 @@ func TestDuplicateAES(t *testing.T) {
 	require.Equal(t, decrypted, data)
 
 }
-
-const maxDigestBuffer = 1024
 
 func encryptDecryptSymmetric(rwr transport.TPM, keyAuth tpm2.AuthHandle, iv, data []byte, decrypt bool) ([]byte, error) {
 	var out, block []byte
@@ -1810,7 +1773,7 @@ func TestDuplicateHMAC(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_HMAC, duplicatepb.Secret_EKRSA, "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_HMAC, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultPersistentHandle), "", dupKeyTemplate, sens2B, nil)
 	// ************************
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{

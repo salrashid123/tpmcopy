@@ -32,20 +32,12 @@ message Secret {
     EKRSA = 1;      
   }  
   repeated PCRS pcrs = 5;  
-  Key key = 6;
+  string key = 6;
   repeated bytes authValue = 7;
+  string parentName = 8;
 }
 
 message PCRS {
   int32 pcr = 1;
   bytes value = 2;
-}
-
-message Key {
-  string name = 1;
-  string parentName = 2;
-  bool emptyAuth = 3;
-  bytes dupPub = 4;
-  bytes dupDup = 5;
-  bytes dupSeed = 6;
 }
