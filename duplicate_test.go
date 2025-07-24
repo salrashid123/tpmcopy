@@ -585,16 +585,16 @@ func TestImportPersistent(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = tpm2.ReadPublic{
-		ObjectHandle: tpm2.TPMHandle(defaultPersistentHandle),
+		ObjectHandle: tpm2.TPMHandle(defaultParentPersistentHandle),
 	}.Execute(rwrB)
 	if err == nil {
 		_, err = tpm2.EvictControl{
 			Auth: tpm2.TPMRHOwner,
 			ObjectHandle: &tpm2.NamedHandle{
-				Handle: tpm2.TPMIDHPersistent(defaultPersistentHandle),
-				Name:   tpm2.HandleName(tpm2.TPMIDHPersistent(defaultPersistentHandle)),
+				Handle: tpm2.TPMIDHPersistent(defaultParentPersistentHandle),
+				Name:   tpm2.HandleName(tpm2.TPMIDHPersistent(defaultParentPersistentHandle)),
 			},
-			PersistentHandle: tpm2.TPMIDHPersistent(defaultPersistentHandle),
+			PersistentHandle: tpm2.TPMIDHPersistent(defaultParentPersistentHandle),
 		}.Execute(rwrB)
 		require.NoError(t, err)
 	}
@@ -605,14 +605,14 @@ func TestImportPersistent(t *testing.T) {
 			Handle: ekHandle,
 			Name:   pubEKB.Name,
 		},
-		PersistentHandle: tpm2.TPMHandle(defaultPersistentHandle),
+		PersistentHandle: tpm2.TPMHandle(defaultParentPersistentHandle),
 	}.Execute(rwrB)
 	require.NoError(t, err)
 
 	key, err := Import(&TPMConfig{
 		TPMDevice:               tpmDeviceB,
 		SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
-	}, tpm2.TPMHandle(defaultPersistentHandle), s)
+	}, tpm2.TPMHandle(defaultParentPersistentHandle), s)
 	require.NoError(t, err)
 
 	_, _ = tpm2.FlushContext{
@@ -1196,7 +1196,7 @@ func TestDuplicateECC(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_ECC, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultPersistentHandle), "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_ECC, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultParentPersistentHandle), "", dupKeyTemplate, sens2B, nil)
 
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -1490,7 +1490,7 @@ func TestDuplicateAES(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_AES, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultPersistentHandle), "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_AES, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultParentPersistentHandle), "", dupKeyTemplate, sens2B, nil)
 
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{
@@ -1773,7 +1773,7 @@ func TestDuplicateHMAC(t *testing.T) {
 	s, err := Duplicate(&TPMConfig{
 		TPMDevice:               tpmDeviceA,
 		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
-	}, ekPububFromPEMTemplate, duplicatepb.Secret_HMAC, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultPersistentHandle), "", dupKeyTemplate, sens2B, nil)
+	}, ekPububFromPEMTemplate, duplicatepb.Secret_HMAC, duplicatepb.Secret_EKRSA, tpm2.TPMHandle(defaultParentPersistentHandle), "", dupKeyTemplate, sens2B, nil)
 	// ************************
 	require.NoError(t, err)
 	_, _ = tpm2.FlushContext{

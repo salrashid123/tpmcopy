@@ -82,6 +82,49 @@ func run() int {
 		return 1
 	}
 
+	// create a new session to load
+	// load_session, load_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return 1
+	// }
+	// defer load_session_cleanup()
+
+	// _, err = tpm2.PolicySecret{
+	// 	AuthHandle: tpm2.AuthHandle{
+	// 		Handle: tpm2.TPMRHEndorsement,
+	// 		Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+	// 		Auth:   tpm2.PasswordAuth([]byte("")),
+	// 	},
+	// 	PolicySession: load_session.Handle(),
+	// 	NonceTPM:      load_session.NonceTPM(),
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return 1
+	// }
+
+	// rsaKey, err := tpm2.Load{
+	// 	ParentHandle: tpm2.AuthHandle{
+	// 		Handle: primaryKey.ObjectHandle,
+	// 		Name:   tpm2.TPM2BName(primaryKey.Name),
+	// 		Auth:   load_session,
+	// 	},
+	// 	InPublic:  pubregen.OutPublic,
+	// 	InPrivate: key.Privkey,
+	// }.Execute(rwr)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return 1
+	// }
+
+	// defer func() {
+	// 	flushContextCmd := tpm2.FlushContext{
+	// 		FlushHandle: rsaKey.ObjectHandle,
+	// 	}
+	// 	_, _ = flushContextCmd.Execute(rwr)
+	// }()
+
 	stringToSign := "foo"
 	fmt.Printf("Data to sign %s\n", stringToSign)
 
