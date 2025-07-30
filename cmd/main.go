@@ -596,23 +596,14 @@ func run() int {
 			if *parent == 0 {
 				*parent = defaultPersistentHandle
 			}
-			kp, err := tpm2.ReadPublic{
+			_, err = tpm2.ReadPublic{
 				ObjectHandle: tpm2.TPMHandle(uint32(*parent)),
 			}.Execute(rwr)
 			if err == nil {
-				_, err = tpm2.EvictControl{
-					Auth: tpm2.TPMRHOwner,
-					ObjectHandle: &tpm2.NamedHandle{
-						Handle: tpm2.TPMIDHPersistent(uint32(*parent)),
-						Name:   kp.Name,
-					},
-					PersistentHandle: tpm2.TPMHandle(uint32(*parent)),
-				}.Execute(rwr)
-				if err != nil {
-					fmt.Fprintf(os.Stdout, "error exsting persistentHandle [%s] already defined: ", strconv.FormatUint(uint64(*parent), 16))
-					return 1
-				}
+				fmt.Fprintf(os.Stdout, "using key parent persistntHandle at [%s] already defined  ", strconv.FormatUint(uint64(*parent), 16))
+				return 1
 			}
+			fmt.Fprintf(os.Stdout, "saving ekParent at  persistntHandle [%s]\n", strconv.FormatUint(uint64(*parent), 16))
 
 			_, err = tpm2.EvictControl{
 				Auth: tpm2.TPMRHOwner,
