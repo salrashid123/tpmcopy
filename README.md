@@ -724,3 +724,123 @@ Direct local duplicate creation:
 * [Duplicate and Transfer without local TPM on source](https://github.com/salrashid123/tpm2/tree/master/tpm2_duplicate_direct)
 
 ---
+
+
+#### TPMPolicy Syntax PEM Encoding
+
+If you want to encode the policies into the PEM file based on the __draft__ [ASN.1 Specification for TPM 2.0 Key Files](https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-key-policy-specification), then set `ENABLE_POLICY_SYNTAX` environment variable to any value during the duplicate and import steps.
+
+Please note that it the specs are still draft and is incompatible with the PEM format used by openssl
+
+Anyway, the big advantage of this encoding is the PEM file describes the steps to generate the policy itself and execute them.
+
+For example, see the link here on how to [manually generate](https://github.com/salrashid123/tpm2/tree/master/policy_gen) the policies and  use [policySyntax utility](https://github.com/salrashid123/tpm2genkey/tree/main?tab=readme-ov-file#policy-command-parameters).
+
+In the following note that the same codebase will execute the both types of policies in `keyfile_policy/main.go`:
+
+- PolicyAuthValue
+
+For auth value, the following will generate a key with the syntax variables already baked in
+```bash
+export ENABLE_POLICY_SYNTAX=1
+go run cmd/main.go --mode publickey --parentKeyType=rsa \
+    -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+
+go run cmd/main.go --mode duplicate \
+   --keyType=aes --secret=/tmp/aes.key  \
+     --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
+
+tpm2_evictcontrol -c 0x81008000
+go run cmd/main.go  --mode import \
+   --parentKeyType=rsa --in=/tmp/out.json --out=/tmp/tpmkey_auth.pem  --tpm-path=$TPMB
+
+tpm2_flushcontext -t &&  tpm2_flushcontext -s  &&  tpm2_flushcontext -l
+
+
+cd example/
+go run keyfile_policy/main.go --pemFile=/tmp/tpmkey_auth.pem --tpm-path=$TPMB --password=bar
+```
+
+- PolicyPCR
+
+```bash
+export ENABLE_POLICY_SYNTAX=1
+go run cmd/main.go --mode publickey --parentKeyType=rsa \
+    -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+
+
+go run cmd/main.go --mode duplicate --keyType=aes    --secret=/tmp/aes.key  \
+     --pcrValues=23:f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b  \
+      -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json --tpm-path=$TPMA
+
+tpm2_evictcontrol -c 0x81008000
+go run cmd/main.go --mode import --parentKeyType=rsa --in=/tmp/out.json --out=/tmp/tpmkey_pcr.pem --tpm-path=$TPMB
+
+cd example/
+go run keyfile_policy/main.go --pemFile=/tmp/tpmkey_pcr.pem --tpm-path=$TPMB
+```
+
+the specific PEM files generated has the polices encode into it itself.
+
+Note that the command code for `PolicyDuplicateSelect=0x00000188`, `TPMCCPolicyOR=0x00000171`, `TPMCCPolicyPCR=0x0000017F`
+
+for authvalue 
+
+```bash
+$ openssl asn1parse -in  /tmp/tpmkey_auth.pem 
+    0:d=0  hl=4 l= 406 cons: SEQUENCE          
+    4:d=1  hl=2 l=   6 prim: OBJECT            :2.23.133.10.1.3
+   12:d=1  hl=2 l=   3 cons: cont [ 0 ]        
+   14:d=2  hl=2 l=   1 prim: BOOLEAN           :255
+   17:d=1  hl=3 l= 150 cons: cont [ 1 ]        
+   20:d=2  hl=3 l= 147 cons: SEQUENCE          
+   23:d=3  hl=2 l=  10 cons: SEQUENCE          
+   25:d=4  hl=2 l=   4 cons: cont [ 0 ]        
+   27:d=5  hl=2 l=   2 prim: INTEGER           :016B
+   31:d=4  hl=2 l=   2 cons: cont [ 1 ]        
+   33:d=5  hl=2 l=   0 prim: OCTET STRING      
+   35:d=3  hl=2 l=  49 cons: SEQUENCE          
+   37:d=4  hl=2 l=   4 cons: cont [ 0 ]        
+   39:d=5  hl=2 l=   2 prim: INTEGER           :0188
+   43:d=4  hl=2 l=  41 cons: cont [ 1 ]        
+   45:d=5  hl=2 l=  39 prim: OCTET STRING      [HEX DUMP]:00000022000B75CE518FE809BFF11C7C3575FB50B943F9EFC3E4C3E0FA4AC3AD796D7DF66DE700
+   86:d=3  hl=2 l=  82 cons: SEQUENCE          
+   88:d=4  hl=2 l=   4 cons: cont [ 0 ]        
+   90:d=5  hl=2 l=   2 prim: INTEGER           :0171
+   94:d=4  hl=2 l=  74 cons: cont [ 1 ]        
+   96:d=5  hl=2 l=  72 prim: OCTET STRING      [HEX DUMP]:0000000200208FCD2169AB92694E0C633F1AB772842B8241BBC20288981FC7AC1EDDC1FDDB0E0020E6613C6F3F14B6A9C8613FA7D2766BAB170C6E477BB047C5E10928DA897FCB1D
+  170:d=1  hl=2 l=   5 prim: INTEGER           :81008000
+  177:d=1  hl=2 l=  84 prim: OCTET STRING      [HEX DUMP]:00520025000B000600000020B27A9BE905FD3C543969DF3965EA3B62F554DCB20681BC484E90FAF03FA6E04300060080004300206D1078F0CF8B17C99CD183C71D3E0F29F62FB655B97EC1135832EAFDDB795FF7
+  263:d=1  hl=3 l= 144 prim: OCTET STRING      [HEX DUMP]:008E0020F99928C2177F50253A7F8568EC7B14CB1A39C538B3CF4AC83A031257857355EE0010E7A442207E6488A97D046687B925135F5A4F579FA4E4120A2BC274B568DA75EAF2D24299EA17EF2B3132EF39BB64FB9CFF83E772B1FEF2916D0BB3283322B7A4EC809DB0F5229232C5D8EA4A858AADC17D8889A7327A589DFE9560C335D843C725CD21ACD441ED8ACA17
+```
+
+for PCR:
+
+```bash
+$ openssl asn1parse -in  /tmp/tpmkey_pcr.pem 
+    0:d=0  hl=4 l= 450 cons: SEQUENCE          
+    4:d=1  hl=2 l=   6 prim: OBJECT            :2.23.133.10.1.3
+   12:d=1  hl=2 l=   3 cons: cont [ 0 ]        
+   14:d=2  hl=2 l=   1 prim: BOOLEAN           :255
+   17:d=1  hl=3 l= 194 cons: cont [ 1 ]        
+   20:d=2  hl=3 l= 191 cons: SEQUENCE          
+   23:d=3  hl=2 l=  54 cons: SEQUENCE          
+   25:d=4  hl=2 l=   4 cons: cont [ 0 ]        
+   27:d=5  hl=2 l=   2 prim: INTEGER           :017F
+   31:d=4  hl=2 l=  46 cons: cont [ 1 ]        
+   33:d=5  hl=2 l=  44 prim: OCTET STRING      [HEX DUMP]:0020E2F61C3F71D1DEFD3FA999DFA36953755C690689799962B48BEBD836974E8CF900000001000B03000080
+   79:d=3  hl=2 l=  49 cons: SEQUENCE          
+   81:d=4  hl=2 l=   4 cons: cont [ 0 ]        
+   83:d=5  hl=2 l=   2 prim: INTEGER           :0188
+   87:d=4  hl=2 l=  41 cons: cont [ 1 ]        
+   89:d=5  hl=2 l=  39 prim: OCTET STRING      [HEX DUMP]:00000022000B75CE518FE809BFF11C7C3575FB50B943F9EFC3E4C3E0FA4AC3AD796D7DF66DE700
+  130:d=3  hl=2 l=  82 cons: SEQUENCE          
+  132:d=4  hl=2 l=   4 cons: cont [ 0 ]        
+  134:d=5  hl=2 l=   2 prim: INTEGER           :0171
+  138:d=4  hl=2 l=  74 cons: cont [ 1 ]        
+  140:d=5  hl=2 l=  72 prim: OCTET STRING      [HEX DUMP]:0000000200202094289099C2CB180F28F99C71C8D681123935F7330BDAE5AA1AE1E09F0FE5320020E6613C6F3F14B6A9C8613FA7D2766BAB170C6E477BB047C5E10928DA897FCB1D
+  214:d=1  hl=2 l=   5 prim: INTEGER           :81008000
+  221:d=1  hl=2 l=  84 prim: OCTET STRING      [HEX DUMP]:00520025000B000600000020114DE1F5BD4B2EC1AA51DE81CA4CEE5EB7B34FD338DCFB0D635F7F65DB56DBF80006008000430020237668CD3AF2827B9A590B32EAA8056226DB1C0D89000E403845AE13C4E35240
+  307:d=1  hl=3 l= 144 prim: OCTET STRING      [HEX DUMP]:008E002034CC17FD41CE5414923D8C75624E746276809068E34EF06A2DBBC933004A2E900010EEDBD95BE8D7746EF004BC0DA7CE289B3EEC0FCDC969ADD1D3DC4122FC79BF72F02D2DD9DE11171767FF3979ABA236BC8BF27914B682AFDA920802CD10297594E1A5094A9936AE6CAFE16DDCE1170E65F7A819B1310F8378641DCEF141E3592701D3D80CB35FDC16FB12
+```
+

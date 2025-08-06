@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 
 	keyfile "github.com/foxboron/go-tpm-keyfiles"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	duplicatepb "github.com/salrashid123/tpmcopy/duplicatepb"
+
+	genkeyutil "github.com/salrashid123/tpm2genkey/util"
 )
 
 type TPMConfig struct {
@@ -23,6 +26,10 @@ type TPMConfig struct {
 	Ownerpw                 []byte         // password for the owner
 	SessionEncryptionHandle tpm2.TPMHandle // (optional) handle to use for transit encryption
 }
+
+const (
+	policySyntaxEnv = "ENABLE_POLICY_SYNTAX" // environment variable to toggle if the policy syntax should be applied to the keyfile
+)
 
 // get the public PEM public key for the provide handle
 func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
@@ -203,7 +210,9 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 	var dupDup []byte
 	var dupSeed []byte
 
+	var ap []*keyfile.TPMPolicy
 	var pcv []*duplicatepb.PCRS
+
 	if len(pcrs) > 0 {
 		// create a pcr trial session to get its digest
 		pcr_sess_trial, pcr_sess_trial_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, []tpm2.AuthOption{tpm2.Trial(), tpm2.AESEncryption(128, tpm2.EncryptInOut), tpm2.Salted(h.SessionEncryptionHandle, *encryptionPub)}...)
@@ -224,6 +233,24 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("error executing PolicyPCR: %v", err)
 		}
+
+		// generate the PolicySyntax command parameters to save into the PEM file or Secret
+		e, err := genkeyutil.CPBytes(tpm2.PolicyPCR{
+			PcrDigest: tpm2.TPM2BDigest{
+				Buffer: pcrHash,
+			},
+			Pcrs: tpm2.TPMLPCRSelection{
+				PCRSelections: sel.PCRSelections,
+			},
+		})
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyPCR: %v", err)
+		}
+
+		ap = append(ap, &keyfile.TPMPolicy{
+			CommandCode:   int(tpm2.TPMCCPolicyPCR),
+			CommandPolicy: e,
+		})
 
 		// read the digest
 		pcrpgd, err := tpm2.PolicyGetDigest{
@@ -253,6 +280,18 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 			return duplicatepb.Secret{}, fmt.Errorf("error setting policy duplicationSelect %v", err)
 		}
 
+		de, err := genkeyutil.CPBytes(tpm2.PolicyDuplicationSelect{
+			NewParentName: *ekName,
+		})
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyDuplicationSelect: %v", err)
+		}
+
+		ap = append(ap, &keyfile.TPMPolicy{
+			CommandCode:   int(tpm2.TPMCCPolicyDuplicationSelect),
+			CommandPolicy: de,
+		})
+
 		// get its digest
 		dupselpgd, err := tpm2.PolicyGetDigest{
 			PolicySession: dupselect_sess_trial.Handle(),
@@ -279,6 +318,18 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("error setting policyOR %v", err)
 		}
+
+		por, err := genkeyutil.CPBytes(tpm2.PolicyOr{
+			PHashList: tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{pcrpgd.PolicyDigest, dupselpgd.PolicyDigest}},
+		})
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyOr: %v", err)
+		}
+
+		ap = append(ap, &keyfile.TPMPolicy{
+			CommandCode:   int(tpm2.TPMCCPolicyOR),
+			CommandPolicy: por,
+		})
 
 		// calculate the OR hash
 		or_trial_digest, err := tpm2.PolicyGetDigest{
@@ -434,6 +485,16 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 			return duplicatepb.Secret{}, fmt.Errorf("error executing PolicyPCR: %v", err)
 		}
 
+		e, err := genkeyutil.CPBytes(tpm2.PolicyAuthValue{})
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyAuthValue: %v", err)
+		}
+
+		ap = append(ap, &keyfile.TPMPolicy{
+			CommandCode:   int(tpm2.TPMCCPolicyAuthValue),
+			CommandPolicy: e,
+		})
+
 		// read the digest
 		papgd, err := tpm2.PolicyGetDigest{
 			PolicySession: pa_sess_trial.Handle(),
@@ -459,6 +520,18 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("error setting policy PolicyDuplicationSelect %v", err)
 		}
+
+		de, err := genkeyutil.CPBytes(tpm2.PolicyDuplicationSelect{
+			NewParentName: *ekName,
+		})
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyDuplicationSelect: %v", err)
+		}
+
+		ap = append(ap, &keyfile.TPMPolicy{
+			CommandCode:   int(tpm2.TPMCCPolicyDuplicationSelect),
+			CommandPolicy: de,
+		})
 
 		pgd, err := tpm2.PolicyGetDigest{
 			PolicySession: dupselect_sess_trial.Handle(),
@@ -486,6 +559,18 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf("error setting policyOR %v", err)
 		}
+
+		por, err := genkeyutil.CPBytes(tpm2.PolicyOr{
+			PHashList: tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{papgd.PolicyDigest, pgd.PolicyDigest}},
+		})
+		if err != nil {
+			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyOr: %v", err)
+		}
+
+		ap = append(ap, &keyfile.TPMPolicy{
+			CommandCode:   int(tpm2.TPMCCPolicyOR),
+			CommandPolicy: por,
+		})
 
 		// calculate the OR hash
 		or_trial_digest, err := tpm2.PolicyGetDigest{
@@ -627,13 +712,23 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 	if parentHandle != 0 {
 		kparent = tpm2.TPMRHOwner
 	}
+
+	_, ok := os.LookupEnv(policySyntaxEnv)
+	if !ok {
+		ap = nil
+	}
+
 	tkey := keyfile.TPMKey{
 		Keytype:   keyfile.OIDImportableKey,
 		EmptyAuth: true,
 		Parent:    kparent,
+		Policy:    ap,
 		Secret:    tpm2.TPM2BEncryptedSecret{Buffer: dupSeed},
 		Privkey:   tpm2.TPM2BPrivate{Buffer: dupDup},
 		Pubkey:    tpm2.BytesAs2B[tpm2.TPMTPublic](dupPub),
+	}
+	if dupSensitive.AuthValue.Buffer != nil {
+		tkey.EmptyAuth = false
 	}
 	keyFileBytes := new(bytes.Buffer)
 	err = keyfile.Encode(keyFileBytes, &tkey)
@@ -757,5 +852,8 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (key
 		keyfile.WithParent(handle), //(tpm2.TPMRHOwner), // the parent isnt really the owner
 		keyfile.WithAuthPolicy(nil),
 	)
+	kfn.Policy = kf.Policy
+	kfn.EmptyAuth = kf.EmptyAuth
+
 	return *kfn, nil
 }
