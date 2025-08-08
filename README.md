@@ -37,7 +37,13 @@ If you want to transfer an external `RSA|ECC|AES|HMAC` key _from_  `TPM-A`  to `
 5. On `TPM-B` use the imported key to sign,encrypt,decrypt,hmac
 
 
-It is critical to note the key that is transferred carries specific TPM policies which must be fulfilled upon use.  These policies ensure the key cannot get duplicated beyond the target TPM or that a password is required when used (`tpm2_policyor(tpm2_policypcr | tpm2_policyduplicateselect` and `tpm2_policyor(tpm2_policyauthvalue | tpm2_policyduplicateselct`).  For more details, see the section below on [Bound Key Policy](#bound-key-policy)
+It is critical to note the key that is transferred carries specific TPM policies which must be fulfilled upon use.  
+These policies ensure the key cannot get duplicated beyond the target TPM. Specifically, the keys carry:
+
+* PCR: `tpm2_policyor(tpm2_policypcr | tpm2_policyduplicateselect`
+* Password: `tpm2_policyor(tpm2_policyauthvalue | tpm2_policyduplicateselct)`.
+
+For more details, see the section below on [Bound Key Policy](#bound-key-policy)
 
 
 ---
