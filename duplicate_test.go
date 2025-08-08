@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	keyfile "github.com/foxboron/go-tpm-keyfiles"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	duplicatepb "github.com/salrashid123/tpmcopy/duplicatepb"
@@ -1961,5 +1962,241 @@ func hmac(rwr transport.TPM, data []byte, objHandle tpm2.TPMHandle, objName tpm2
 	}
 
 	return rspSC.Result.Buffer, nil
+
+}
+
+func TestDuplicatePasswordH2(t *testing.T) {
+	tpmDeviceA, err := net.Dial("tcp", swTPMPathA)
+	require.NoError(t, err)
+	defer tpmDeviceA.Close()
+
+	tpmDeviceB, err := net.Dial("tcp", swTPMPathB)
+	require.NoError(t, err)
+	defer tpmDeviceB.Close()
+
+	rwrA := transport.FromReadWriter(tpmDeviceA)
+	rwrB := transport.FromReadWriter(tpmDeviceB)
+
+	defer tpmDeviceA.Close()
+	defer tpmDeviceB.Close()
+
+	h2primary, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHOwner,
+		InPublic:      tpm2.New2B(keyfile.ECCSRK_H2_Template),
+	}.Execute(rwrB)
+	require.NoError(t, err)
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: h2primary.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwrB)
+	}()
+
+	hpub, err := h2primary.OutPublic.Contents()
+	require.NoError(t, err)
+
+	flushContextCmd := tpm2.FlushContext{
+		FlushHandle: h2primary.ObjectHandle,
+	}
+	_, err = flushContextCmd.Execute(rwrB)
+	require.NoError(t, err)
+
+	// TPM-A
+
+	keyFile := "testdata/certs/key_rsa.pem"
+	kbytes, err := os.ReadFile(keyFile)
+	require.NoError(t, err)
+
+	block, _ := pem.Decode(kbytes)
+	require.NoError(t, err)
+
+	// Parse the PKCS#1 private key
+	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	require.NoError(t, err)
+
+	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
+	require.True(t, ok)
+
+	dupKeyTemplate := tpm2.TPMTPublic{
+		Type:    tpm2.TPMAlgRSA,
+		NameAlg: tpm2.TPMAlgSHA256,
+		ObjectAttributes: tpm2.TPMAObject{
+			SignEncrypt:         true,
+			FixedTPM:            false,
+			FixedParent:         false,
+			SensitiveDataOrigin: false,
+			UserWithAuth:        false,
+		},
+
+		Parameters: tpm2.NewTPMUPublicParms(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPMSRSAParms{
+				Exponent: uint32(rsaPrivateKey.PublicKey.E),
+				Scheme: tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSASSA,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSASSA,
+						&tpm2.TPMSSigSchemeRSASSA{
+							HashAlg: tpm2.TPMAlgSHA256,
+						},
+					),
+				},
+				KeyBits: 2048,
+			},
+		),
+
+		Unique: tpm2.NewTPMUPublicID(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPublicKeyRSA{
+				Buffer: rsaPrivateKey.PublicKey.N.Bytes(),
+			},
+		),
+	}
+
+	sens2B := tpm2.TPMTSensitive{
+		SensitiveType: tpm2.TPMAlgRSA,
+		AuthValue: tpm2.TPM2BAuth{
+			Buffer: []byte(nil), // set any userAuth
+		},
+		Sensitive: tpm2.NewTPMUSensitiveComposite(
+			tpm2.TPMAlgRSA,
+			&tpm2.TPM2BPrivateKeyRSA{Buffer: rsaPrivateKey.Primes[0].Bytes()},
+		),
+	}
+
+	// // get the endorsement key for the local TPM which we will use for parameter encryption
+	sessionEncryptionRspA, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHEndorsement,
+		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+	}.Execute(rwrA)
+	require.NoError(t, err)
+	defer func() {
+		_, _ = tpm2.FlushContext{
+			FlushHandle: sessionEncryptionRspA.ObjectHandle,
+		}.Execute(rwrA)
+	}()
+
+	s, err := Duplicate(&TPMConfig{
+		TPMDevice:               tpmDeviceA,
+		SessionEncryptionHandle: sessionEncryptionRspA.ObjectHandle,
+	}, *hpub, duplicatepb.Secret_RSA, duplicatepb.Secret_EKECC, tpm2.TPMRHOwner, "", dupKeyTemplate, sens2B, nil)
+	// ************************
+	require.NoError(t, err)
+	_, _ = tpm2.FlushContext{
+		FlushHandle: sessionEncryptionRspA.ObjectHandle,
+	}.Execute(rwrA)
+
+	/// now import
+
+	sessionEncryptionRspB, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHEndorsement,
+		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+	}.Execute(rwrB)
+	require.NoError(t, err)
+	defer func() {
+		_, _ = tpm2.FlushContext{
+			FlushHandle: sessionEncryptionRspB.ObjectHandle,
+		}.Execute(rwrB)
+	}()
+
+	key, err := Import(&TPMConfig{
+		TPMDevice:               tpmDeviceB,
+		SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
+	}, tpm2.TPMRHOwner, s)
+	require.NoError(t, err)
+
+	_, _ = tpm2.FlushContext{
+		FlushHandle: sessionEncryptionRspB.ObjectHandle,
+	}.Execute(rwrB)
+	require.NoError(t, err)
+
+	h2primaryload, err := tpm2.CreatePrimary{
+		PrimaryHandle: key.Parent,
+		InPublic:      tpm2.New2B(keyfile.ECCSRK_H2_Template),
+	}.Execute(rwrB)
+	require.NoError(t, err)
+
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: h2primaryload.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwrB)
+	}()
+
+	regenRSAKey, err := tpm2.Load{
+		ParentHandle: tpm2.NamedHandle{
+			Handle: h2primaryload.ObjectHandle,
+			Name:   h2primaryload.Name,
+		},
+		InPublic:  key.Pubkey,
+		InPrivate: key.Privkey,
+	}.Execute(rwrB)
+	require.NoError(t, err)
+
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: regenRSAKey.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwrB)
+	}()
+
+	pubregen, err := tpm2.ReadPublic{
+		ObjectHandle: regenRSAKey.ObjectHandle,
+	}.Execute(rwrB)
+	require.NoError(t, err)
+
+	outPubBregen, err := pubregen.OutPublic.Contents()
+	require.NoError(t, err)
+
+	rsaDetailBregen, err := outPubBregen.Parameters.RSADetail()
+	require.NoError(t, err)
+
+	rsaUniqueBregen, err := outPubBregen.Unique.RSA()
+	require.NoError(t, err)
+
+	rsaPubBregen, err := tpm2.RSAPub(rsaDetailBregen, rsaUniqueBregen)
+	require.NoError(t, err)
+
+	require.Equal(t, rsaPubBregen, &rsaPrivateKey.PublicKey)
+
+	stringToSign := "foo"
+
+	b := []byte(stringToSign)
+
+	h := sha256.New()
+	h.Write(b)
+	digest := h.Sum(nil)
+
+	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(nil), h2primary.Name)
+	require.NoError(t, err)
+	or_sess, or_sess_cleanup, err := svc.GetSession()
+	require.NoError(t, err)
+	defer or_sess_cleanup()
+
+	sign := tpm2.Sign{
+		KeyHandle: tpm2.AuthHandle{
+			Handle: regenRSAKey.ObjectHandle,
+			Name:   regenRSAKey.Name,
+			Auth:   or_sess,
+		},
+		Digest: tpm2.TPM2BDigest{
+			Buffer: digest[:],
+		},
+		InScheme: tpm2.TPMTSigScheme{
+			Scheme: tpm2.TPMAlgRSASSA,
+			Details: tpm2.NewTPMUSigScheme(
+				tpm2.TPMAlgRSASSA,
+				&tpm2.TPMSSchemeHash{
+					HashAlg: tpm2.TPMAlgSHA256,
+				},
+			),
+		},
+		Validation: tpm2.TPMTTKHashCheck{
+			Tag: tpm2.TPMSTHashCheck,
+		},
+	}
+
+	_, err = sign.Execute(rwrB)
+	require.NoError(t, err)
 
 }

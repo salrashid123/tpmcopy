@@ -704,13 +704,12 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 		dupDup = duplicateResp.Duplicate.Buffer
 	}
 
-	// todo: fill in AuthValue
-	// https://github.com/salrashid123/tpm2/tree/master/policy_gen
-
-	kparent := tpm2.TPMRHOwner
-
+	//  its just a convention i'm using for using the default EK RSA/ECC keys has parent=tpm2.TPMRHNull
+	kparent := tpm2.TPMRHNull
+	// unless a parent is actually specified, use that.
+	// If you intend the key to have the the H2 EK parent, set to  0x40000001
 	if parentHandle != 0 {
-		kparent = tpm2.TPMRHOwner
+		kparent = parentHandle
 	}
 
 	_, ok := os.LookupEnv(policySyntaxEnv)
@@ -748,15 +747,11 @@ func Duplicate(h *TPMConfig, ekPububFromPEMTemplate tpm2.TPMTPublic, keyType dup
 }
 
 // import the given duplicate secret into a target tpm
-func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (keyfile.TPMKey, error) {
+func Import(h *TPMConfig, parentHandle tpm2.TPMHandle, secret duplicatepb.Secret) (keyfile.TPMKey, error) {
 
 	if h.SessionEncryptionHandle == 0 {
 		return keyfile.TPMKey{}, fmt.Errorf("error please specify a sessionEncryptionHandle")
 	}
-
-	// if !keyfile.IsMSO(handle, keyfile.TPM_HT_PERSISTENT) {
-	// 	return keyfile.TPMKey{}, fmt.Errorf("error please specify a persistent handle as the parent")
-	// }
 
 	rwr := transport.FromReadWriter(h.TPMDevice)
 
@@ -788,68 +783,114 @@ func Import(h *TPMConfig, handle tpm2.TPMHandle, secret duplicatepb.Secret) (key
 		_, _ = flushContextCmd.Execute(rwr)
 	}()
 
-	ekPub, err := tpm2.ReadPublic{
-		ObjectHandle: tpm2.TPMIDHObject(handle),
-	}.Execute(rwr)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("error reading  handle public %v", err)
-	}
-
-	if secret.ParentName != hex.EncodeToString(ekPub.Name.Buffer) {
-		return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", secret.ParentName, hex.EncodeToString(ekPub.Name.Buffer))
-	}
-
-	/// import
-
-	import_sess, import_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("setting up trial session: %v", err)
-	}
-	defer import_session_cleanup()
-
-	_, err = tpm2.PolicySecret{
-		AuthHandle: tpm2.AuthHandle{
-			Handle: tpm2.TPMRHEndorsement,
-			Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
-			Auth:   tpm2.PasswordAuth(h.Ownerpw),
-		},
-		PolicySession: import_sess.Handle(),
-		NonceTPM:      import_sess.NonceTPM(),
-	}.Execute(rwr, sess)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("error setting policy PolicyDuplicationSelect %v", err)
-	}
-
 	kf, err := keyfile.Decode([]byte(secret.Key))
 	if err != nil {
 		return keyfile.TPMKey{}, fmt.Errorf("unmarshal secret.key %v", err)
 	}
 
-	importCmd := tpm2.Import{
-		ParentHandle: tpm2.AuthHandle{
-			Handle: handle,
-			Name:   ekPub.Name,
-			Auth:   import_sess,
-		},
-		ObjectPublic: kf.Pubkey,
-		Duplicate: tpm2.TPM2BPrivate{
-			Buffer: kf.Privkey.Buffer,
-		},
-		InSymSeed: tpm2.TPM2BEncryptedSecret{
-			Buffer: kf.Secret.Buffer,
-		},
-	}
+	var importResp *tpm2.ImportResponse
+	var importCmd tpm2.Import
 
-	importResp, err := importCmd.Execute(rwr, sess)
-	if err != nil {
-		return keyfile.TPMKey{}, fmt.Errorf("...can't run import dup %v", err)
+	if keyfile.IsMSO(tpm2.TPMHandle(parentHandle), keyfile.TPM_HT_PERMANENT) {
+
+		h2primary, err := tpm2.CreatePrimary{
+			PrimaryHandle: tpm2.AuthHandle{
+				Handle: parentHandle,
+				Auth:   tpm2.PasswordAuth(h.Ownerpw),
+			},
+			InPublic: tpm2.New2B(keyfile.ECCSRK_H2_Template),
+		}.Execute(rwr)
+		if err != nil {
+			return keyfile.TPMKey{}, fmt.Errorf("error creating h2 CreatePrimary %v", err)
+		}
+		defer func() {
+			flushContextCmd := tpm2.FlushContext{
+				FlushHandle: h2primary.ObjectHandle,
+			}
+			_, _ = flushContextCmd.Execute(rwr)
+		}()
+
+		if secret.ParentName != hex.EncodeToString(h2primary.Name.Buffer) {
+			return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", secret.ParentName, hex.EncodeToString(h2primary.Name.Buffer))
+		}
+
+		importCmd = tpm2.Import{
+			ParentHandle: tpm2.NamedHandle{
+				Handle: h2primary.ObjectHandle,
+				Name:   h2primary.Name,
+			},
+			ObjectPublic: kf.Pubkey,
+			Duplicate: tpm2.TPM2BPrivate{
+				Buffer: kf.Privkey.Buffer,
+			},
+			InSymSeed: tpm2.TPM2BEncryptedSecret{
+				Buffer: kf.Secret.Buffer,
+			},
+		}
+		importResp, err = importCmd.Execute(rwr, sess)
+		if err != nil {
+			return keyfile.TPMKey{}, fmt.Errorf("...can't run import from H2 createPrimary %v", err)
+		}
+
+	} else {
+		ekPub, err := tpm2.ReadPublic{
+			ObjectHandle: tpm2.TPMIDHObject(parentHandle),
+		}.Execute(rwr)
+		if err != nil {
+			return keyfile.TPMKey{}, fmt.Errorf("error reading  handle public %v", err)
+		}
+
+		if secret.ParentName != hex.EncodeToString(ekPub.Name.Buffer) {
+			return keyfile.TPMKey{}, fmt.Errorf("wrapping public key mismatch, expected [%s], got [%s]", secret.ParentName, hex.EncodeToString(ekPub.Name.Buffer))
+		}
+
+		/// import
+
+		importSession, import_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+		if err != nil {
+			return keyfile.TPMKey{}, fmt.Errorf("setting up trial session: %v", err)
+		}
+		defer import_session_cleanup()
+
+		_, err = tpm2.PolicySecret{
+			AuthHandle: tpm2.AuthHandle{
+				Handle: tpm2.TPMRHEndorsement,
+				Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+				Auth:   tpm2.PasswordAuth(h.Ownerpw),
+			},
+			PolicySession: importSession.Handle(),
+			NonceTPM:      importSession.NonceTPM(),
+		}.Execute(rwr, sess)
+		if err != nil {
+			return keyfile.TPMKey{}, fmt.Errorf("error setting policy PolicySecret %v", err)
+		}
+
+		importCmd = tpm2.Import{
+			ParentHandle: tpm2.AuthHandle{
+				Handle: parentHandle,
+				Name:   ekPub.Name,
+				Auth:   importSession,
+			},
+
+			ObjectPublic: kf.Pubkey,
+			Duplicate: tpm2.TPM2BPrivate{
+				Buffer: kf.Privkey.Buffer,
+			},
+			InSymSeed: tpm2.TPM2BEncryptedSecret{
+				Buffer: kf.Secret.Buffer,
+			},
+		}
+		importResp, err = importCmd.Execute(rwr, sess)
+		if err != nil {
+			return keyfile.TPMKey{}, fmt.Errorf("...can't run Import for EK RSA %v", err)
+		}
 	}
 
 	kfn := keyfile.NewTPMKey(
 		keyfile.OIDLoadableKey,
 		importCmd.ObjectPublic,
 		importResp.OutPrivate,
-		keyfile.WithParent(handle), //(tpm2.TPMRHOwner), // the parent isnt really the owner
+		keyfile.WithParent(parentHandle),
 		keyfile.WithAuthPolicy(nil),
 	)
 	kfn.Policy = kf.Policy

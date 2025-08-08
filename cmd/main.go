@@ -213,6 +213,11 @@ func run() int {
 				return 1
 			}
 			ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+			if *parent != 0 {
+				if keyfile.IsMSO(tpm2.TPMHandle(*parent), keyfile.TPM_HT_PERMANENT) {
+					ekPububFromPEMTemplate = keyfile.ECCSRK_H2_Template
+				}
+			}
 			ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
 				tpm2.TPMAlgECC,
 				&tpm2.TPMSECCPoint{
@@ -521,8 +526,8 @@ func run() int {
 			return 1
 		}
 
-		kParent := tpm2.TPMRHOwner
-		if *parent == 0 {
+		kParent := tpm2.TPMHandle(0)
+		if *parent != 0 {
 			kParent = tpm2.TPMHandle(*parent)
 		}
 
@@ -561,6 +566,13 @@ func run() int {
 				fmt.Fprintf(os.Stdout, "--parent= cannot be 0 if useExistingParent is set")
 				return 1
 			}
+			if keyfile.IsMSO(tpm2.TPMHandle(*parent), keyfile.TPM_HT_PERMANENT) {
+				// the specs https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-parent
+				// state that if the parent is a permanent handle, then we need to run through the H2 Template procedure, otherwise, its
+				// persistent handle
+				fmt.Printf("Parent is TPM_HT_PERMANENT\n")
+			}
+
 			parentHandle = tpm2.TPMHandle(uint32(*parent))
 		} else {
 			var t tpm2.TPMTPublic
@@ -593,29 +605,30 @@ func run() int {
 				}
 			}()
 
-			if *parent == 0 {
+			if *parent == 0 || *parent == uint(tpm2.TPMRHNull) {
 				*parent = defaultPersistentHandle
 			}
 			_, err = tpm2.ReadPublic{
 				ObjectHandle: tpm2.TPMHandle(uint32(*parent)),
 			}.Execute(rwr)
 			if err == nil {
-				fmt.Fprintf(os.Stdout, "using key parent persistntHandle at [%s] already defined  ", strconv.FormatUint(uint64(*parent), 16))
-				return 1
-			}
-			fmt.Fprintf(os.Stdout, "saving ekParent at  persistntHandle [%s]\n", strconv.FormatUint(uint64(*parent), 16))
+				fmt.Fprintf(os.Stdout, "using existing key parent persistntHandle at [0x%s]\n", strconv.FormatUint(uint64(*parent), 16))
+				//return 1
+			} else {
+				fmt.Fprintf(os.Stdout, "saving ekParent at  persistntHandle [0x%s]\n", strconv.FormatUint(uint64(*parent), 16))
 
-			_, err = tpm2.EvictControl{
-				Auth: tpm2.TPMRHOwner,
-				ObjectHandle: &tpm2.NamedHandle{
-					Handle: cCreateEK.ObjectHandle,
-					Name:   cCreateEK.Name,
-				},
-				PersistentHandle: tpm2.TPMHandle(uint32(*parent)),
-			}.Execute(rwr)
-			if err != nil {
-				fmt.Fprintf(os.Stdout, "Error creating persistentHandle %v\n", err)
-				return 1
+				_, err = tpm2.EvictControl{
+					Auth: tpm2.TPMRHOwner,
+					ObjectHandle: &tpm2.NamedHandle{
+						Handle: cCreateEK.ObjectHandle,
+						Name:   cCreateEK.Name,
+					},
+					PersistentHandle: tpm2.TPMHandle(uint32(*parent)),
+				}.Execute(rwr)
+				if err != nil {
+					fmt.Fprintf(os.Stdout, "Error creating persistentHandle [0x%s]  %v\n", strconv.FormatUint(uint64(*parent), 16), err)
+					return 1
+				}
 			}
 			parentHandle = tpm2.TPMHandle(*parent)
 		}
@@ -696,76 +709,122 @@ func run() int {
 			return 1
 		}
 
-		var t tpm2.TPMTPublic
-		switch *parentkeyType {
-		case "rsa":
-			t = tpm2.RSAEKTemplate
-		case "ecc":
-			t = tpm2.ECCEKTemplate
-		default:
-			fmt.Fprintf(os.Stdout, "unsupported KeyType %v\n", *keyType)
-			return 1
-		}
-		cCreateEK, err := tpm2.CreatePrimary{
-			PrimaryHandle: tpm2.TPMRHEndorsement,
-			InPublic:      tpm2.New2B(t),
-		}.Execute(rwr)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "can't create primaryObject: %v", err)
-			return 1
-		}
+		var rsaKey *tpm2.LoadResponse
 
-		defer func() {
-			flushContextCmd := tpm2.FlushContext{
-				FlushHandle: cCreateEK.ObjectHandle,
-			}
-			_, err := flushContextCmd.Execute(rwr)
+		if keyfile.IsMSO(tpm2.TPMHandle(key.Parent), keyfile.TPM_HT_PERMANENT) {
+			// the specs https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-parent
+			// state that if the parent is a permanent handle, then we need to run through the H2 Template procedure, otherwise, its
+			// persistent handle
+			h2primary, err := tpm2.CreatePrimary{
+				PrimaryHandle: tpm2.AuthHandle{
+					Handle: tpm2.TPMRHOwner,
+					Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
+				},
+				InPublic: tpm2.New2B(keyfile.ECCSRK_H2_Template),
+			}.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
+				fmt.Fprintf(os.Stdout, "failed loading key with parent: %v", err)
+				return 1
 			}
-		}()
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: h2primary.ObjectHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwr)
+			}()
 
-		load_session, load_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "setting up trial session: %v", err)
-			return 1
-		}
-		defer load_session_cleanup()
-
-		_, err = tpm2.PolicySecret{
-			AuthHandle: tpm2.AuthHandle{
-				Handle: tpm2.TPMRHEndorsement,
-				Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
-				Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
-			},
-			PolicySession: load_session.Handle(),
-			NonceTPM:      load_session.NonceTPM(),
-		}.Execute(rwr)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "error setting policy PolicyDuplicationSelect %v", err)
-			return 1
-		}
-
-		rsaKey, err := tpm2.Load{
-			ParentHandle: tpm2.AuthHandle{
-				Handle: cCreateEK.ObjectHandle,
-				Name:   tpm2.TPM2BName(cCreateEK.Name),
-				Auth:   load_session,
-			},
-			InPublic:  key.Pubkey,
-			InPrivate: key.Privkey,
-		}.Execute(rwr)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "error loading key %v", err)
-			return 1
-		}
-
-		defer func() {
-			flushContextCmd := tpm2.FlushContext{
-				FlushHandle: rsaKey.ObjectHandle,
+			rsaKey, err = tpm2.Load{
+				ParentHandle: tpm2.NamedHandle{
+					Handle: h2primary.ObjectHandle,
+					Name:   tpm2.TPM2BName(h2primary.Name),
+				},
+				InPublic:  key.Pubkey,
+				InPrivate: key.Privkey,
+			}.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "error loading key %v", err)
+				return 1
 			}
-			_, _ = flushContextCmd.Execute(rwr)
-		}()
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: rsaKey.ObjectHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwr)
+			}()
+
+		} else {
+			var t tpm2.TPMTPublic
+			switch *parentkeyType {
+			case "rsa":
+				t = tpm2.RSAEKTemplate
+			case "ecc":
+				t = tpm2.ECCEKTemplate
+			default:
+				fmt.Fprintf(os.Stdout, "unsupported KeyType %v\n", *keyType)
+				return 1
+			}
+			cCreateEK, err := tpm2.CreatePrimary{
+				PrimaryHandle: tpm2.TPMRHEndorsement,
+				InPublic:      tpm2.New2B(t),
+			}.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "can't create primaryObject: %v", err)
+				return 1
+			}
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: cCreateEK.ObjectHandle,
+				}
+				_, err := flushContextCmd.Execute(rwr)
+				if err != nil {
+					fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
+				}
+			}()
+
+			load_session, load_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "setting up trial session: %v", err)
+				return 1
+			}
+			defer load_session_cleanup()
+
+			_, err = tpm2.PolicySecret{
+				AuthHandle: tpm2.AuthHandle{
+					Handle: tpm2.TPMRHEndorsement,
+					Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+					Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
+				},
+				PolicySession: load_session.Handle(),
+				NonceTPM:      load_session.NonceTPM(),
+			}.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "error setting policy PolicyDuplicationSelect %v", err)
+				return 1
+			}
+
+			rsaKey, err = tpm2.Load{
+				ParentHandle: tpm2.AuthHandle{
+					Handle: cCreateEK.ObjectHandle,
+					Name:   tpm2.TPM2BName(cCreateEK.Name),
+					Auth:   load_session,
+				},
+				InPublic:  key.Pubkey,
+				InPrivate: key.Privkey,
+			}.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "error loading key %v", err)
+				return 1
+			}
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: rsaKey.ObjectHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwr)
+			}()
+		}
 
 		_, err = tpm2.EvictControl{
 			Auth: tpm2.TPMRHOwner,
