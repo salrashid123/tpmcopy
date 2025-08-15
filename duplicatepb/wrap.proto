@@ -28,13 +28,13 @@ message Secret {
   }
   ParentKeyType parentKeyType = 4;
   enum ParentKeyType {
-    EKECC = 0;
-    EKRSA = 1;      
+    EndoresementECC = 0;
+    EndorsementRSA = 1;
+    H2 = 2;    
   }  
   repeated PCRS pcrs = 5;  
   string key = 6;
-  repeated bytes authValue = 7;
-  string parentName = 8;
+  string parentName = 7;
 }
 
 message PCRS {

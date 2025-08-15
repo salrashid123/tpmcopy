@@ -73,13 +73,12 @@ func run() int {
 		return 1
 	}
 
-	if keyfile.IsMSO(tpm2.TPMHandle(key.Parent), keyfile.TPM_HT_PERMANENT) {
-		fmt.Println("is mso")
-	}
-
 	h2primary, err := tpm2.CreatePrimary{
-		PrimaryHandle: key.Parent,
-		InPublic:      tpm2.New2B(keyfile.ECCSRK_H2_Template),
+		PrimaryHandle: tpm2.NamedHandle{
+			Handle: tpm2.TPMRHOwner,
+			Name:   tpm2.HandleName(tpm2.TPMRHOwner),
+		},
+		InPublic: tpm2.New2B(keyfile.ECCSRK_H2_Template),
 	}.Execute(rwr)
 	if err != nil {
 

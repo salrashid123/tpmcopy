@@ -22,9 +22,10 @@ import (
 const ()
 
 var (
-	tpmPath  = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
-	pemFile  = flag.String("pemFile", "/tmp/tpmkey.pem", "KeyFile in PEM format")
-	password = flag.String("password", "", "Password authorization value")
+	tpmPath       = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
+	pemFile       = flag.String("pemFile", "/tmp/tpmkey.pem", "KeyFile in PEM format")
+	password      = flag.String("password", "", "Password authorization value")
+	parentkeyType = flag.String("parentKeyType", "rsa_ek", "type of of the parent key (rsa or ecc)")
 )
 
 var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
@@ -70,9 +71,23 @@ func run() int {
 		return 1
 	}
 
+	var pubK tpm2.TPMTPublic
+	var parent tpm2.TPMHandle
+	switch *parentkeyType {
+	case "ecc_ek":
+		pubK = tpm2.ECCEKTemplate
+		parent = tpm2.TPMRHEndorsement
+	case "rsa_ek":
+		pubK = tpm2.RSAEKTemplate
+		parent = tpm2.TPMRHEndorsement
+	default:
+		fmt.Println("unknown parent key type")
+		return 1
+	}
+
 	primaryKey, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
-		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+		PrimaryHandle: parent,
+		InPublic:      tpm2.New2B(pubK),
 	}.Execute(rwr)
 	if err != nil {
 		fmt.Println(err)

@@ -76,19 +76,22 @@ func (Secret_KeyType) EnumDescriptor() ([]byte, []int) {
 type Secret_ParentKeyType int32
 
 const (
-	Secret_EKECC Secret_ParentKeyType = 0
-	Secret_EKRSA Secret_ParentKeyType = 1
+	Secret_EndoresementECC Secret_ParentKeyType = 0
+	Secret_EndorsementRSA  Secret_ParentKeyType = 1
+	Secret_H2              Secret_ParentKeyType = 2
 )
 
 // Enum value maps for Secret_ParentKeyType.
 var (
 	Secret_ParentKeyType_name = map[int32]string{
-		0: "EKECC",
-		1: "EKRSA",
+		0: "EndoresementECC",
+		1: "EndorsementRSA",
+		2: "H2",
 	}
 	Secret_ParentKeyType_value = map[string]int32{
-		"EKECC": 0,
-		"EKRSA": 1,
+		"EndoresementECC": 0,
+		"EndorsementRSA":  1,
+		"H2":              2,
 	}
 )
 
@@ -127,8 +130,7 @@ type Secret struct {
 	ParentKeyType Secret_ParentKeyType   `protobuf:"varint,4,opt,name=parentKeyType,proto3,enum=duplicatepb.Secret_ParentKeyType" json:"parentKeyType,omitempty"`
 	Pcrs          []*PCRS                `protobuf:"bytes,5,rep,name=pcrs,proto3" json:"pcrs,omitempty"`
 	Key           string                 `protobuf:"bytes,6,opt,name=key,proto3" json:"key,omitempty"`
-	AuthValue     [][]byte               `protobuf:"bytes,7,rep,name=authValue,proto3" json:"authValue,omitempty"`
-	ParentName    string                 `protobuf:"bytes,8,opt,name=parentName,proto3" json:"parentName,omitempty"`
+	ParentName    string                 `protobuf:"bytes,7,opt,name=parentName,proto3" json:"parentName,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -188,7 +190,7 @@ func (x *Secret) GetParentKeyType() Secret_ParentKeyType {
 	if x != nil {
 		return x.ParentKeyType
 	}
-	return Secret_EKECC
+	return Secret_EndoresementECC
 }
 
 func (x *Secret) GetPcrs() []*PCRS {
@@ -203,13 +205,6 @@ func (x *Secret) GetKey() string {
 		return x.Key
 	}
 	return ""
-}
-
-func (x *Secret) GetAuthValue() [][]byte {
-	if x != nil {
-		return x.AuthValue
-	}
-	return nil
 }
 
 func (x *Secret) GetParentName() string {
@@ -275,26 +270,26 @@ var File_duplicatepb_wrap_proto protoreflect.FileDescriptor
 
 const file_duplicatepb_wrap_proto_rawDesc = "" +
 	"\n" +
-	"\x16duplicatepb/wrap.proto\x12\vduplicatepb\"\xfe\x02\n" +
+	"\x16duplicatepb/wrap.proto\x12\vduplicatepb\"\xfb\x02\n" +
 	"\x06Secret\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x05R\aversion\x12/\n" +
 	"\x04type\x18\x03 \x01(\x0e2\x1b.duplicatepb.Secret.KeyTypeR\x04type\x12G\n" +
 	"\rparentKeyType\x18\x04 \x01(\x0e2!.duplicatepb.Secret.ParentKeyTypeR\rparentKeyType\x12%\n" +
 	"\x04pcrs\x18\x05 \x03(\v2\x11.duplicatepb.PCRSR\x04pcrs\x12\x10\n" +
-	"\x03key\x18\x06 \x01(\tR\x03key\x12\x1c\n" +
-	"\tauthValue\x18\a \x03(\fR\tauthValue\x12\x1e\n" +
+	"\x03key\x18\x06 \x01(\tR\x03key\x12\x1e\n" +
 	"\n" +
-	"parentName\x18\b \x01(\tR\n" +
+	"parentName\x18\a \x01(\tR\n" +
 	"parentName\".\n" +
 	"\aKeyType\x12\a\n" +
 	"\x03ECC\x10\x00\x12\a\n" +
 	"\x03RSA\x10\x01\x12\b\n" +
 	"\x04HMAC\x10\x02\x12\a\n" +
-	"\x03AES\x10\x03\"%\n" +
-	"\rParentKeyType\x12\t\n" +
-	"\x05EKECC\x10\x00\x12\t\n" +
-	"\x05EKRSA\x10\x01\".\n" +
+	"\x03AES\x10\x03\"@\n" +
+	"\rParentKeyType\x12\x13\n" +
+	"\x0fEndoresementECC\x10\x00\x12\x12\n" +
+	"\x0eEndorsementRSA\x10\x01\x12\x06\n" +
+	"\x02H2\x10\x02\".\n" +
 	"\x04PCRS\x12\x10\n" +
 	"\x03pcr\x18\x01 \x01(\x05R\x03pcr\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05valueB3Z1github.com/salrashid123/go-tpm-wrapping/tpmwrappbb\x06proto3"

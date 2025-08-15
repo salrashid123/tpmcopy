@@ -25,26 +25,22 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const (
-	// pg 14: https://trustedcomputinggroup.org/wp-content/uploads/RegistryOfReservedTPM2HandlesAndLocalities_v1p1_pub.pdf
-	defaultPersistentHandle = 0x81008000
-)
+const ()
 
 var (
 	help = flag.Bool("help", false, "print usage")
 
 	mode = flag.String("mode", "", "publickey | duplicate | import | evict")
 
-	keyType               = flag.String("keyType", "type of key to duplicate", "rsa|ecc|aes|hmac")
-	keyName               = flag.String("keyName", "", "User defined description of the key to export")
-	tpmPublicKeyFile      = flag.String("tpmPublicKeyFile", "/tmp/public.pem", "File to write the public key to (default /tmp/public.pem)")
-	parentkeyType         = flag.String("parentKeyType", "rsa", "type of of the parent key (rsa or ecc)")
+	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
+
+	keyType          = flag.String("keyType", "type of key to duplicate", "rsa|ecc|aes|hmac|seal")
+	keyName          = flag.String("keyName", "", "User defined description of the key to export")
+	tpmPublicKeyFile = flag.String("tpmPublicKeyFile", "/tmp/public.pem", "File to write the public key to (default /tmp/public.pem)")
+
 	sessionEncryptionName = flag.String("tpm-session-encrypt-with-name", "", "hex encoded TPM object 'name' to use with an encrypted session")
 	pcrValues             = flag.String("pcrValues", "", "PCR Bound value (increasing order, comma separated)")
 	secret                = flag.String("secret", "", "File with secret to duplicate (rsa | ecc | hex encoded symmetric key or hmac pass)")
-
-	parent            = flag.Uint("parent", 0, "parent persistentHandle to create and encode the TPM PEM key file against (default 0x81018000 permanent)")
-	useExistingParent = flag.Bool("useExistingParent", false, "Use an existing persistentHandle Parent (default: false)")
 
 	out     = flag.String("out", "/tmp/out.json", "File to write the duplicate to")
 	in      = flag.String("in", "/tmp/out.json", "FileName with the key to import")
@@ -55,7 +51,8 @@ var (
 	password = flag.String("password", "", "Password for the created key")
 	ownerpw  = flag.String("ownerpw", "", "Owner Password for the created key")
 
-	persistentHandle = flag.Uint("persistentHandle", 0x81008001, "persistentHandle to save the key to (default 0x81008001 permanent)")
+	persistentHandle       = flag.Uint("persistentHandle", 0x81008001, "persistentHandle to save the key to (default 0x81008001 persistent)")
+	parentpersistentHandle = flag.Uint("parentpersistentHandle", 0, "persistentHandle to save the key to (default 0 persistent)")
 
 	version           = flag.Bool("version", false, "print version")
 	Commit, Tag, Date string
@@ -81,94 +78,7 @@ func run() int {
 		return 0
 	}
 
-	rwc, err := tpmcopy.OpenTPM(*tpmPath)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "can't open TPM : %v", err)
-		return 1
-	}
-	defer func() {
-		rwc.Close()
-	}()
-	rwr := transport.FromReadWriter(rwc)
-
-	// // get the endorsement key for the local TPM which we will use for parameter encryption
-	sessionEncryptionRsp, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
-		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
-	}.Execute(rwr)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "error creating EK Primary  %v", err)
-		return 1
-	}
-	defer func() {
-		_, _ = tpm2.FlushContext{
-			FlushHandle: sessionEncryptionRsp.ObjectHandle,
-		}.Execute(rwr)
-	}()
-
-	if *sessionEncryptionName != "" {
-		if *sessionEncryptionName != hex.EncodeToString(sessionEncryptionRsp.Name.Buffer) {
-			fmt.Fprintf(os.Stdout, " session encryption names do not match expected [%s] got [%s]", *sessionEncryptionName, hex.EncodeToString(sessionEncryptionRsp.Name.Buffer))
-			return 1
-		}
-	}
-
-	switch *mode {
-	case "publickey":
-
-		if *tpmPublicKeyFile == "" {
-			fmt.Fprintf(os.Stdout, "tpmPublicKeyFile must be specified")
-			return 1
-		}
-
-		var t tpm2.TPMTPublic
-		switch *parentkeyType {
-		case "rsa":
-			t = tpm2.RSAEKTemplate
-		case "ecc":
-			t = tpm2.ECCEKTemplate
-		default:
-			fmt.Fprintf(os.Stdout, "unsupported --keyType must be either rsa or ecc, got %v\n", *keyType)
-			return 1
-		}
-
-		cCreateEK, err := tpm2.CreatePrimary{
-			PrimaryHandle: tpm2.TPMRHEndorsement,
-			InPublic:      tpm2.New2B(t),
-		}.Execute(rwr)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "can't create object TPM: %v", err)
-			return 1
-		}
-
-		defer func() {
-			flushContextCmd := tpm2.FlushContext{
-				FlushHandle: cCreateEK.ObjectHandle,
-			}
-			_, err := flushContextCmd.Execute(rwr)
-			if err != nil {
-				fmt.Fprintf(os.Stdout, "can't close TPM %v", err)
-			}
-		}()
-
-		b, err := tpmcopy.GetPublicKey(&tpmcopy.TPMConfig{
-			TPMDevice:               rwc,
-			Ownerpw:                 []byte(*ownerpw),
-			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle,
-		}, cCreateEK.ObjectHandle)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "can't getting public key %v", err)
-			return 1
-		}
-
-		err = os.WriteFile(*tpmPublicKeyFile, b, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
-			return 1
-		}
-		fmt.Printf("Public Key written to: %s\n", *tpmPublicKeyFile)
-		return 0
-	case "duplicate":
+	if *mode == "duplicate" {
 
 		if *tpmPublicKeyFile == "" || *secret == "" || *out == "" {
 			fmt.Fprintf(os.Stdout, "tpmPublicKeyFile, secret and out  parameters must be specified")
@@ -199,37 +109,38 @@ func run() int {
 				return 1
 			}
 			ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+			pkt = duplicatepb.Secret_EndorsementRSA
 			ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
 				tpm2.TPMAlgRSA,
 				&tpm2.TPM2BPublicKeyRSA{
 					Buffer: rsaPub.N.Bytes(),
 				},
 			)
-			pkt = duplicatepb.Secret_EKRSA
 		case *ecdsa.PublicKey:
 			ecPub, ok := parsedKey.(*ecdsa.PublicKey)
 			if !ok {
 				fmt.Fprintf(os.Stdout, "  error converting encryptingPublicKey to ecdsa")
 				return 1
 			}
-			ekPububFromPEMTemplate = tpm2.ECCEKTemplate
-			if *parent != 0 {
-				if keyfile.IsMSO(tpm2.TPMHandle(*parent), keyfile.TPM_HT_PERMANENT) {
-					ekPububFromPEMTemplate = keyfile.ECCSRK_H2_Template
-				}
+
+			if *parentKeyType == tpmcopy.H2 {
+				ekPububFromPEMTemplate = keyfile.ECCSRK_H2_Template
+				pkt = duplicatepb.Secret_H2
+			} else {
+				ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+				pkt = duplicatepb.Secret_EndoresementECC
 			}
 			ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
 				tpm2.TPMAlgECC,
 				&tpm2.TPMSECCPoint{
 					X: tpm2.TPM2BECCParameter{
-						Buffer: ecPub.X.Bytes(), // ecPub.X.FillBytes(make([]byte, len(ecPub.X.Bytes()))),
+						Buffer: ecPub.X.Bytes(),
 					},
 					Y: tpm2.TPM2BECCParameter{
-						Buffer: ecPub.Y.Bytes(), // ecPub.Y.FillBytes(make([]byte, len(ecPub.Y.Bytes()))),
+						Buffer: ecPub.Y.Bytes(),
 					},
 				},
 			)
-			pkt = duplicatepb.Secret_EKECC
 		default:
 			fmt.Fprintf(os.Stdout, "unsupported public key type %v", pub)
 			return 1
@@ -526,16 +437,7 @@ func run() int {
 			return 1
 		}
 
-		kParent := tpm2.TPMHandle(0)
-		if *parent != 0 {
-			kParent = tpm2.TPMHandle(*parent)
-		}
-
-		wrappb, err := tpmcopy.Duplicate(&tpmcopy.TPMConfig{
-			TPMDevice:               rwc,
-			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle,
-			Ownerpw:                 []byte(*ownerpw),
-		}, ekPububFromPEMTemplate, kt, pkt, kParent, *keyName, dupKeyTemplate, sens2B, pcrMap)
+		wrappb, err := tpmcopy.Duplicate(ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, pcrMap)
 		if err != nil {
 			fmt.Fprintf(os.Stdout, "error duplicating %v", err)
 			return 1
@@ -553,84 +455,120 @@ func run() int {
 			return 1
 		}
 		fmt.Printf("Duplicate Key written to: %s\n", *out)
+		return 0
+	}
+
+	if *mode != "import" && *mode != "publickey" && *mode != "evict" {
+		fmt.Fprintf(os.Stdout, "--mode must be either import, publickey, evict or duplicate, got  %s", *mode)
+		return 1
+	}
+	rwc, err := tpmcopy.OpenTPM(*tpmPath)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "can't open TPM : %v", err)
+		return 1
+	}
+	defer func() {
+		rwc.Close()
+	}()
+	rwr := transport.FromReadWriter(rwc)
+
+	// // get the endorsement key for the local TPM which we will use for parameter encryption
+	sessionEncryptionRsp, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.AuthHandle{
+			Handle: tpm2.TPMRHEndorsement,
+			Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+			Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
+		},
+		InPublic: tpm2.New2B(tpm2.RSAEKTemplate),
+	}.Execute(rwr)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "error creating EK Primary  %v", err)
+		return 1
+	}
+	defer func() {
+		_, _ = tpm2.FlushContext{
+			FlushHandle: sessionEncryptionRsp.ObjectHandle,
+		}.Execute(rwr)
+	}()
+
+	if *sessionEncryptionName != "" {
+		if *sessionEncryptionName != hex.EncodeToString(sessionEncryptionRsp.Name.Buffer) {
+			fmt.Fprintf(os.Stdout, " session encryption names do not match expected [%s] got [%s]", *sessionEncryptionName, hex.EncodeToString(sessionEncryptionRsp.Name.Buffer))
+			return 1
+		}
+	}
+
+	switch *mode {
+	case "publickey":
+
+		if *tpmPublicKeyFile == "" {
+			fmt.Fprintf(os.Stdout, "tpmPublicKeyFile must be specified")
+			return 1
+		}
+
+		var t tpm2.TPMTPublic
+		var primaryHandle tpm2.TPMHandle
+
+		switch *parentKeyType {
+		case tpmcopy.RSA_EK:
+			t = tpm2.RSAEKTemplate
+			primaryHandle = tpm2.TPMRHEndorsement
+		case tpmcopy.ECC_EK:
+			t = tpm2.ECCEKTemplate
+			primaryHandle = tpm2.TPMRHEndorsement
+		case tpmcopy.H2:
+			t = keyfile.ECCSRK_H2_Template
+			primaryHandle = tpm2.TPMRHOwner
+		default:
+			fmt.Fprintf(os.Stdout, "unsupported --keyType must be either rsa or ecc, got %v\n", *keyType)
+			return 1
+		}
+
+		cCreateEK, err := tpm2.CreatePrimary{
+			PrimaryHandle: tpm2.AuthHandle{
+				Handle: primaryHandle,
+				Name:   tpm2.HandleName(primaryHandle),
+				Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
+			},
+			InPublic: tpm2.New2B(t),
+		}.Execute(rwr)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "can't create object TPM: %v", err)
+			return 1
+		}
+
+		defer func() {
+			flushContextCmd := tpm2.FlushContext{
+				FlushHandle: cCreateEK.ObjectHandle,
+			}
+			_, err := flushContextCmd.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "can't close TPM %v", err)
+			}
+		}()
+
+		b, err := tpmcopy.GetPublicKey(&tpmcopy.TPMConfig{
+			TPMDevice:               rwc,
+			Ownerpw:                 []byte(*ownerpw),
+			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle,
+		}, cCreateEK.ObjectHandle)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "can't getting public key %v", err)
+			return 1
+		}
+
+		err = os.WriteFile(*tpmPublicKeyFile, b, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
+			return 1
+		}
+		fmt.Printf("Public Key written to: %s\n", *tpmPublicKeyFile)
+		return 0
 	case "import":
 
 		if *in == "" || *out == "" {
 			fmt.Fprintf(os.Stdout, "in and out  parameters must be specified")
 			return 1
-		}
-
-		var parentHandle tpm2.TPMHandle
-		if *useExistingParent {
-			if *parent == 0 {
-				fmt.Fprintf(os.Stdout, "--parent= cannot be 0 if useExistingParent is set")
-				return 1
-			}
-			if keyfile.IsMSO(tpm2.TPMHandle(*parent), keyfile.TPM_HT_PERMANENT) {
-				// the specs https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-parent
-				// state that if the parent is a permanent handle, then we need to run through the H2 Template procedure, otherwise, its
-				// persistent handle
-				fmt.Printf("Parent is TPM_HT_PERMANENT\n")
-			}
-
-			parentHandle = tpm2.TPMHandle(uint32(*parent))
-		} else {
-			var t tpm2.TPMTPublic
-			switch *parentkeyType {
-			case "rsa":
-				t = tpm2.RSAEKTemplate
-			case "ecc":
-				t = tpm2.ECCEKTemplate
-			default:
-				fmt.Fprintf(os.Stdout, "unsupported KeyType %v\n", *keyType)
-				return 1
-			}
-
-			cCreateEK, err := tpm2.CreatePrimary{
-				PrimaryHandle: tpm2.TPMRHEndorsement,
-				InPublic:      tpm2.New2B(t),
-			}.Execute(rwr)
-			if err != nil {
-				fmt.Fprintf(os.Stdout, "can't create object TPM: %v", err)
-				return 1
-			}
-
-			defer func() {
-				flushContextCmd := tpm2.FlushContext{
-					FlushHandle: cCreateEK.ObjectHandle,
-				}
-				_, err := flushContextCmd.Execute(rwr)
-				if err != nil {
-					fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
-				}
-			}()
-
-			if *parent == 0 || *parent == uint(tpm2.TPMRHNull) {
-				*parent = defaultPersistentHandle
-			}
-			_, err = tpm2.ReadPublic{
-				ObjectHandle: tpm2.TPMHandle(uint32(*parent)),
-			}.Execute(rwr)
-			if err == nil {
-				fmt.Fprintf(os.Stdout, "using existing key parent persistntHandle at [0x%s]\n", strconv.FormatUint(uint64(*parent), 16))
-				//return 1
-			} else {
-				fmt.Fprintf(os.Stdout, "saving ekParent at  persistntHandle [0x%s]\n", strconv.FormatUint(uint64(*parent), 16))
-
-				_, err = tpm2.EvictControl{
-					Auth: tpm2.TPMRHOwner,
-					ObjectHandle: &tpm2.NamedHandle{
-						Handle: cCreateEK.ObjectHandle,
-						Name:   cCreateEK.Name,
-					},
-					PersistentHandle: tpm2.TPMHandle(uint32(*parent)),
-				}.Execute(rwr)
-				if err != nil {
-					fmt.Fprintf(os.Stdout, "Error creating persistentHandle [0x%s]  %v\n", strconv.FormatUint(uint64(*parent), 16), err)
-					return 1
-				}
-			}
-			parentHandle = tpm2.TPMHandle(*parent)
 		}
 
 		bt, err := os.ReadFile(*in)
@@ -647,6 +585,52 @@ func run() int {
 			return 1
 		}
 
+		var t tpm2.TPMTPublic
+
+		if *parentKeyType == tpmcopy.RSA_EK && k.ParentKeyType == duplicatepb.Secret_EndorsementRSA {
+			t = tpm2.RSAEKTemplate
+		} else if *parentKeyType == tpmcopy.ECC_EK && k.ParentKeyType == duplicatepb.Secret_EndoresementECC {
+			t = tpm2.ECCEKTemplate
+		} else if *parentKeyType == tpmcopy.H2 && k.ParentKeyType == duplicatepb.Secret_H2 {
+			t = keyfile.ECCSRK_H2_Template
+		} else {
+			fmt.Fprintf(os.Stdout, "  keytype in file [%s] mismatched with command line: [%s]", k.ParentKeyType, *parentKeyType)
+			return 1
+		}
+
+		var primaryParent tpm2.TPMHandle
+
+		if k.ParentKeyType == duplicatepb.Secret_H2 {
+			primaryParent = tpm2.TPMRHOwner
+		} else {
+			primaryParent = tpm2.TPMRHEndorsement
+		}
+
+		cCreateEK, err := tpm2.CreatePrimary{
+			PrimaryHandle: tpm2.AuthHandle{
+				Handle: primaryParent,
+				Name:   tpm2.HandleName(primaryParent),
+				Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
+			},
+			InPublic: tpm2.New2B(t),
+		}.Execute(rwr)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "can't create object TPM: %v", err)
+			return 1
+		}
+
+		defer func() {
+			flushContextCmd := tpm2.FlushContext{
+				FlushHandle: cCreateEK.ObjectHandle,
+			}
+			_, err := flushContextCmd.Execute(rwr)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
+			}
+		}()
+
+		parentHandle := cCreateEK.ObjectHandle
+
 		tpmKey, err := tpmcopy.Import(&tpmcopy.TPMConfig{
 			TPMDevice:               rwc,
 			Ownerpw:                 []byte(*ownerpw),
@@ -656,11 +640,17 @@ func run() int {
 			return 1
 		}
 		kfb := new(bytes.Buffer)
+
+		if keyfile.IsMSO(tpm2.TPMHandle(*parentpersistentHandle), keyfile.TPM_HT_PERSISTENT) {
+			tpmKey.Parent = tpm2.TPMHandle(*parentpersistentHandle)
+		}
+
 		err = keyfile.Encode(kfb, &tpmKey)
 		if err != nil {
 			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
 			return 1
 		}
+
 		err = os.WriteFile(*out, kfb.Bytes(), 0644)
 		if err != nil {
 			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
@@ -717,7 +707,8 @@ func run() int {
 			// persistent handle
 			h2primary, err := tpm2.CreatePrimary{
 				PrimaryHandle: tpm2.AuthHandle{
-					Handle: tpm2.TPMRHOwner,
+					Handle: key.Parent,
+					Name:   tpm2.HandleName(key.Parent),
 					Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
 				},
 				InPublic: tpm2.New2B(keyfile.ECCSRK_H2_Template),
@@ -755,18 +746,26 @@ func run() int {
 
 		} else {
 			var t tpm2.TPMTPublic
-			switch *parentkeyType {
-			case "rsa":
+
+			switch *parentKeyType {
+			case tpmcopy.RSA_EK:
 				t = tpm2.RSAEKTemplate
-			case "ecc":
+			case tpmcopy.ECC_EK:
 				t = tpm2.ECCEKTemplate
 			default:
-				fmt.Fprintf(os.Stdout, "unsupported KeyType %v\n", *keyType)
+				fmt.Fprintf(os.Stdout, "  unsupported parent key type %s", *parentKeyType)
 				return 1
 			}
+
 			cCreateEK, err := tpm2.CreatePrimary{
-				PrimaryHandle: tpm2.TPMRHEndorsement,
-				InPublic:      tpm2.New2B(t),
+
+				PrimaryHandle: tpm2.AuthHandle{
+					Handle: tpm2.TPMRHEndorsement,
+					Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+					Auth:   tpm2.PasswordAuth([]byte(*ownerpw)),
+				},
+
+				InPublic: tpm2.New2B(t),
 			}.Execute(rwr)
 			if err != nil {
 				fmt.Fprintf(os.Stdout, "can't create primaryObject: %v", err)

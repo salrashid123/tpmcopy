@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	TPMA = "127.0.0.1:2321"
 	TPMB = "127.0.0.1:2341"
 )
 
@@ -28,7 +27,7 @@ func TestMain(t *testing.T) {
 	}{
 		{
 			Name:        "publickey",
-			Args:        []string{"--mode=publickey", "--parentKeyType=rsa", fmt.Sprintf("--tpmPublicKeyFile=%s/public.pem", tempDirB), fmt.Sprintf("-tpm-path=%s", TPMB)},
+			Args:        []string{"--mode=publickey", "--parentKeyType=rsa_ek", fmt.Sprintf("--tpmPublicKeyFile=%s/public.pem", tempDirB), fmt.Sprintf("-tpm-path=%s", TPMB)},
 			Output:      fmt.Sprintf("Public Key written to: %s/public.pem\n", tempDirB),
 			ExpectError: false,
 		},
