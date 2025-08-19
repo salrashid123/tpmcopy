@@ -19,7 +19,7 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	saltpm "github.com/salrashid123/signer/tpm"
+	tpmsigner "github.com/salrashid123/signer/tpm"
 )
 
 const ()
@@ -131,12 +131,12 @@ func run() int {
 		_, _ = flushContextCmd.Execute(rwr)
 	}()
 
-	se, err := saltpm.NewPCRAndDuplicateSelectSession(rwr, []tpm2.TPMSPCRSelection{
+	se, err := tpmsigner.NewPCRAndDuplicateSelectSession(rwr, []tpm2.TPMSPCRSelection{
 		{
 			Hash:      tpm2.TPMAlgSHA256,
 			PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
 		},
-	}, nil, primaryKey.Name)
+	}, tpm2.TPM2BDigest{}, nil, primaryKey.Name, primaryKey.ObjectHandle)
 	if err != nil {
 		fmt.Println(err)
 		return 1
@@ -151,7 +151,7 @@ func run() int {
 	h.Write(b)
 	digest := h.Sum(nil)
 
-	r, err := saltpm.NewTPMCrypto(&saltpm.TPM{
+	r, err := tpmsigner.NewTPMCrypto(&tpmsigner.TPM{
 		TpmDevice:   rwc,
 		Handle:      rsaKey.ObjectHandle,
 		AuthSession: se,

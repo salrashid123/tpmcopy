@@ -145,7 +145,7 @@ func run() int {
 			Hash:      tpm2.TPMAlgSHA256,
 			PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
 		},
-	}, nil, primaryKey.Name)
+	}, tpm2.TPM2BDigest{}, nil, primaryKey.Name, primaryKey.ObjectHandle)
 	if err != nil {
 		fmt.Println(err)
 		return 1

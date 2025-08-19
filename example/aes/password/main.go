@@ -17,7 +17,7 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	"github.com/salrashid123/tpmcopy"
+	tpmcopy "github.com/salrashid123/tpmcopy"
 )
 
 const ()
@@ -142,7 +142,7 @@ func run() int {
 	}
 
 	// construct the policy using the utility in this library
-	tce, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	tce, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name, primaryKey.ObjectHandle)
 	if err != nil {
 		fmt.Println(err)
 		return 1
@@ -249,7 +249,7 @@ func run() int {
 	log.Printf("Encrypted %s", hex.EncodeToString(encrypted))
 
 	// construct the policy using the utility in this library
-	tcd, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	tcd, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name, primaryKey.ObjectHandle)
 	if err != nil {
 		fmt.Println(err)
 		return 1

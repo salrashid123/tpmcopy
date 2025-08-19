@@ -480,7 +480,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 			h.Write(b)
 			digest := h.Sum(nil)
 
-			svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(tc.password), pubEKB.Name)
+			svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(tc.password), pubEKB.Name, ekHandle)
 			require.NoError(t, err)
 			or_sess, or_sess_cleanup, err := svc.GetSession()
 			require.NoError(t, err)
@@ -738,7 +738,7 @@ func TestImportPersistent(t *testing.T) {
 	h.Write(b)
 	digest := h.Sum(nil)
 
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(nil), pubEKB.Name)
+	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(nil), pubEKB.Name, ekHandle)
 	require.NoError(t, err)
 	or_sess, or_sess_cleanup, err := svc.GetSession()
 	require.NoError(t, err)
@@ -1032,7 +1032,7 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 					Hash:      tpm2.TPMAlgSHA256,
 					PCRSelect: tpm2.PCClientCompatible.PCRs(pcrList...),
 				},
-			}, tpm2.TPM2BDigest{Buffer: pcrDigest}, nil, epub.Name)
+			}, tpm2.TPM2BDigest{Buffer: pcrDigest}, nil, epub.Name, ekHandle)
 			require.NoError(t, err)
 			or_sess, or_cleanup, err := se.GetSession()
 			if tc.shouldSucceed {
@@ -1313,7 +1313,7 @@ func TestDuplicateECC(t *testing.T) {
 	h.Write(b)
 	digest := h.Sum(nil)
 
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name)
+	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
 	require.NoError(t, err)
 	or_sess, or_sess_cleanup, err := svc.GetSession()
 	require.NoError(t, err)
@@ -1560,7 +1560,7 @@ func TestDuplicateAES(t *testing.T) {
 	_, err = io.ReadFull(rand.Reader, iv)
 	require.NoError(t, err)
 
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name)
+	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
 	require.NoError(t, err)
 	or_sess, or_sess_cleanup, err := svc.GetSession()
 	require.NoError(t, err)
@@ -1574,7 +1574,7 @@ func TestDuplicateAES(t *testing.T) {
 	encrypted, err := encryptDecryptSymmetric(rwrB, keyAuth, iv, data, false)
 	require.NoError(t, err)
 
-	svc, err = NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name)
+	svc, err = NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
 	require.NoError(t, err)
 	or_sess, or_sess_cleanup, err = svc.GetSession()
 	require.NoError(t, err)
@@ -1821,7 +1821,7 @@ func TestDuplicateHMAC(t *testing.T) {
 	data := []byte(stringToEncrypt)
 
 	/// ********************************
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name)
+	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
 	require.NoError(t, err)
 	or_sess, or_sess_cleanup, err := svc.GetSession()
 	require.NoError(t, err)
@@ -2099,7 +2099,19 @@ func TestDuplicatePasswordH2(t *testing.T) {
 	h.Write(b)
 	digest := h.Sum(nil)
 
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(nil), h2primary.Name)
+	encprimary, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHEndorsement,
+		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+	}.Execute(rwrB)
+	require.NoError(t, err)
+	defer func() {
+		flushContextCmd := tpm2.FlushContext{
+			FlushHandle: encprimary.ObjectHandle,
+		}
+		_, _ = flushContextCmd.Execute(rwrB)
+	}()
+
+	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(nil), h2primary.Name, encprimary.ObjectHandle)
 	require.NoError(t, err)
 	or_sess, or_sess_cleanup, err := svc.GetSession()
 	require.NoError(t, err)

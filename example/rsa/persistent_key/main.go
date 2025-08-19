@@ -135,7 +135,7 @@ func run() int {
 	digest := h.Sum(nil)
 
 	// construct the policy using the utility in this library
-	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name, primaryKey.ObjectHandle)
 	if err != nil {
 		fmt.Println(err)
 		return 1

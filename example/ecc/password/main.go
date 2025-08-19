@@ -18,7 +18,7 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	"github.com/salrashid123/tpmcopy"
+	tpmcopy "github.com/salrashid123/tpmcopy"
 )
 
 const ()
@@ -140,7 +140,7 @@ func run() int {
 	digest := h.Sum(nil)
 
 	// construct the policy using the utility in this library
-	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name, primaryKey.ObjectHandle)
 	if err != nil {
 		fmt.Println(err)
 		return 1
