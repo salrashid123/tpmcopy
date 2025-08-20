@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"crypto"
+	"crypto/aes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
@@ -250,12 +252,14 @@ func run() int {
 			parsedKey, err := x509.ParsePKCS8PrivateKey(kblock.Bytes)
 			if err != nil {
 				fmt.Fprintf(os.Stdout, "  error parsing private key : %v", err)
+				return 1
 			}
 
 			kt = duplicatepb.Secret_ECC
 			eccPriv, ok := parsedKey.(*ecdsa.PrivateKey)
 			if !ok {
 				fmt.Fprintf(os.Stdout, "error converting local key to ecc")
+				return 1
 			}
 			pk := eccPriv.PublicKey
 
@@ -316,6 +320,12 @@ func run() int {
 
 			keySensitive := f
 
+			// hmac is bound by the block size (openssl wraps larger keys to fit in)
+			if len(keySensitive) > sha256.BlockSize {
+				fmt.Fprintf(os.Stdout, "error max hmac key size for sha256 is %d bytes", sha256.BlockSize)
+				return 1
+			}
+
 			sv := make([]byte, 32)
 			io.ReadFull(rand.Reader, sv)
 			privHash := crypto.SHA256.New()
@@ -373,6 +383,11 @@ func run() int {
 			keySensitive, err := hex.DecodeString(string(f))
 			if err != nil {
 				fmt.Fprintf(os.Stdout, "  error parsing private key : %v", err)
+				return 1
+			}
+			if len(keySensitive) > aes.BlockSize {
+				fmt.Fprintf(os.Stdout, "  error ke must be smaller than aes blocksize bytes : %d , got %d ", aes.BlockSize, len(keySensitive))
+				return 1
 			}
 			kt = duplicatepb.Secret_AES
 			sv := make([]byte, 32)
