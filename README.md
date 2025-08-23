@@ -894,3 +894,140 @@ cd ..
 ```
 
 ---
+
+### tpmcopy using tpm2_tools
+
+If you want to see how this flow works with pure `tpm2_tools`, see  [PolicyDuplicateSelect and PolicyAuthValue bound PolicyDuplicate](https://gist.github.com/salrashid123/e487848bd5d3538a68c2284e1b24d89d)
+
+Specifically, the following will transfer an rsa key from one TPM to another.  We're using two tpms although `tpmcopy` does not require a a TPM at the source.  We're doing that because tpm2_tools does not allow for an easy way to synthetically duplicate without an actual local TPM.
+
+start two TPMs
+
+```bash
+rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm
+swtpm_setup --tpmstate /tmp/myvtpm --tpm2 --create-ek-cert
+
+rm -rf /tmp/myvtpm2 && mkdir /tmp/myvtpm2
+swtpm_setup --tpmstate /tmp/myvtpm2 --tpm2 --create-ek-cert
+
+swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear --log level=2
+swtpm socket --tpmstate dir=/tmp/myvtpm2 --tpm2 --server type=tcp,port=2341 --ctrl type=tcp,port=2342 --flags not-need-init,startup-clear --log level=2
+```
+
+To transfer from `TPM-A` to `TPM-B`
+
+1) `TPM-B`
+
+Create an endorsement public key and extract the ECC PEM public key:
+
+```bash
+export TPM2TOOLS_TCTI="swtpm:port=2341"
+
+tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
+tpm2_createek -c ek.ctx -G ecc -u ek.pub 
+tpm2_readpublic -c ek.ctx -o ek.pem -f PEM -n ek.name
+tpm2_print -t TPM2B_PUBLIC ek.pub
+```
+
+copy `ek.pem` to `TPM-A`
+
+2) `TPM-A`
+
+```bash
+export TPM2TOOLS_TCTI="swtpm:port=2321"
+## generate an rsa key
+openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -pkeyopt rsa_keygen_pubexp:65537 -out /tmp/key_rsa.pem
+
+tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
+
+# create any primary
+tpm2_createprimary -C o -g sha256 -G rsa -c primaryA.ctx
+
+## create a policy_or(policyAuthValue|policyDuplicateSelect)
+tpm2_startauthsession -S sessionA.dat
+tpm2_policyauthvalue -S sessionA.dat -L policyA_auth.dat 
+tpm2_flushcontext sessionA.dat
+rm sessionA.dat
+
+tpm2_loadexternal -C o -g sha256 -G ecc:null:aes128cfb  -u ek.pem -c newparent.ctx \
+   --policy=837197674484b3f81a90cc8d46a5d724fd52d76e06520b64f2a1da1b331469aa \
+    --attributes="fixedtpm|fixedparent|sensitivedataorigin|adminwithpolicy|restricted|decrypt"
+tpm2_readpublic -c newparent.ctx -o new_parent.pub -n new_parent.name
+
+tpm2_startauthsession -S sessionA.dat
+tpm2_policyduplicationselect -S sessionA.dat  -N new_parent.name -L policyA_dupselect.dat 
+tpm2_flushcontext sessionA.dat
+rm sessionA.dat
+
+tpm2_startauthsession -S sessionA.ctx
+tpm2_policyor -S sessionA.ctx -L policyA_or.dat sha256:policyA_auth.dat,policyA_dupselect.dat 
+tpm2_flushcontext sessionA.ctx
+tpm2_flushcontext -t
+
+### now import the external rsa key
+tpm2_import -C primaryA.ctx -G rsa2048:rsassa:null  -i /tmp/key_rsa.pem -u key.pub -r key.prv  -p bar -a "sign" -L policyA_or.dat
+
+tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
+tpm2_load -C primaryA.ctx -r key.prv -u key.pub -c key.ctx -n key.name
+tpm2_readpublic -c key.ctx -o dup.pub
+
+tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
+
+### create a binding policy
+tpm2_startauthsession -S sessionA.dat --policy-session
+tpm2_policyduplicationselect -S sessionA.dat  -N new_parent.name  -n key.name -L policyA_dupselect.dat 
+tpm2_policyor -S sessionA.dat -L policyA_or.dat sha256:policyA_auth.dat,policyA_dupselect.dat 
+
+## now duplicate
+tpm2_flushcontext -t
+tpm2_duplicate -C newparent.ctx -c key.ctx -G null  -p "session:sessionA.dat" -r dup.dpriv -s dup.seed
+tpm2_flushcontext -t
+```
+
+3)  `TPM-B`
+
+on TPM B, import the duplicated keys, seed:
+
+```bash
+export TPM2TOOLS_TCTI="swtpm:port=2341"
+
+tpm2 flushcontext -t
+tpm2 startauthsession --session session.ctx --policy-session
+tpm2 policysecret --session session.ctx --object-context endorsement
+
+tpm2_import -C ek.ctx -u dup.pub -i dup.dpriv -r dup.prv -s dup.seed  --parent-auth session:session.ctx
+tpm2_flushcontext -t
+tpm2_flushcontext session.ctx
+tpm2_flushcontext -t
+
+tpm2 flushcontext -t
+tpm2 startauthsession --session session.ctx --policy-session
+tpm2 policysecret --session session.ctx --object-context endorsement 
+tpm2_load -C ek.ctx -u dup.pub -r dup.prv -c dup.ctx  --auth session:session.ctx
+tpm2_readpublic -c dup.ctx -o dup.pub
+tpm2_flushcontext session.ctx
+tpm2_flushcontext -t
+
+
+### now create a real policy which will full the conditions set earlier
+tpm2_startauthsession -S sessionB.dat  --policy-session
+tpm2_policyauthvalue -S sessionB.dat  -L policyB_auth.dat 
+tpm2_flushcontext sessionB.dat
+rm sessionB.dat
+
+tpm2_startauthsession -S sessionB.dat --policy-session
+tpm2_policyduplicationselect -S sessionB.dat  -N new_parent.name -L policyB_dupselect.dat 
+tpm2_flushcontext sessionB.dat
+rm sessionB.dat
+
+tpm2_startauthsession -S sessionB.dat --policy-session
+tpm2_policyauthvalue -S sessionB.dat  -L policyB_auth.dat 
+tpm2_policyor -S sessionB.dat -L policyB_or.dat sha256:policyB_auth.dat,policyB_dupselect.dat 
+
+echo "meet me at.." >file.txt
+openssl dgst -sha256  -keyform PEM - -sign /tmp/key_rsa.pem -out sig.dat file.txt
+
+tpm2_flushcontext -t
+tpm2_sign -c dup.ctx -g sha256  -f plain  -p"session:sessionB.dat+bar" -o sig.rss  file.txt
+tpm2_flushcontext -t
+```
