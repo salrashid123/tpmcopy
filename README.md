@@ -891,6 +891,19 @@ go run cmd/main.go --mode import  --parentKeyType=rsa_ek --in=/tmp/out.json --ou
 cd example/
 go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 cd ..
+
+
+### Python RSA
+go run cmd/main.go --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+go run cmd/main.go --mode duplicate  --secret=/tmp/key_rsa.pem --keyType=rsa \
+   --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
+go run cmd/main.go --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
+
+cd example/python
+virtualenv env
+apt-get install libtss2-dev
+python3 -m pip install git+https://github.com/tpm2-software/tpm2-pytss.git
+python3 esapi_keyfile_policy_duplicateselect_password.py
 ```
 
 ---
@@ -943,16 +956,16 @@ tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
 # create any primary
 tpm2_createprimary -C o -g sha256 -G rsa -c primaryA.ctx
 
+tpm2_loadexternal -C o -g sha256 -G ecc:null:aes128cfb  -u ek.pem -c newparent.ctx \
+   --policy=837197674484b3f81a90cc8d46a5d724fd52d76e06520b64f2a1da1b331469aa \
+    --attributes="fixedtpm|fixedparent|sensitivedataorigin|adminwithpolicy|restricted|decrypt"
+tpm2_readpublic -c newparent.ctx -o new_parent.pub -n new_parent.name
+
 ## create a policy_or(policyAuthValue|policyDuplicateSelect)
 tpm2_startauthsession -S sessionA.dat
 tpm2_policyauthvalue -S sessionA.dat -L policyA_auth.dat 
 tpm2_flushcontext sessionA.dat
 rm sessionA.dat
-
-tpm2_loadexternal -C o -g sha256 -G ecc:null:aes128cfb  -u ek.pem -c newparent.ctx \
-   --policy=837197674484b3f81a90cc8d46a5d724fd52d76e06520b64f2a1da1b331469aa \
-    --attributes="fixedtpm|fixedparent|sensitivedataorigin|adminwithpolicy|restricted|decrypt"
-tpm2_readpublic -c newparent.ctx -o new_parent.pub -n new_parent.name
 
 tpm2_startauthsession -S sessionA.dat
 tpm2_policyduplicationselect -S sessionA.dat  -N new_parent.name -L policyA_dupselect.dat 
