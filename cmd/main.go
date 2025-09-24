@@ -185,7 +185,7 @@ func run() int {
 		}
 
 		var hsh tpm2.TPMAlgID
-		switch *hashSchme {
+		switch *hashScheme {
 		case "sha256":
 			hsh = tpm2.TPMAlgSHA256
 		case "sha384":
@@ -193,7 +193,7 @@ func run() int {
 		case "sha512":
 			hsh = tpm2.TPMAlgSHA512
 		default:
-			fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashSchme)
+			fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashScheme)
 			return 1
 		}
 
@@ -239,7 +239,7 @@ func run() int {
 					),
 				}
 			default:
-				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashSchme)
+				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashScheme)
 				return 1
 			}
 
@@ -352,7 +352,7 @@ func run() int {
 					},
 				)
 			default:
-				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashSchme)
+				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashScheme)
 				return 1
 			}
 
