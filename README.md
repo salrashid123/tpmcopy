@@ -241,7 +241,7 @@ import (
 	tpmcopy "github.com/salrashid123/tpmcopy"
 )
 	// for password and with the parent name as primaryKey.Name:
-	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name)
+	tc, err := tpmcopy.NewPolicyAuthValueAndDuplicateSelectSession(rwr, []byte(*password), primaryKey.Name, primaryKey.ObjectHandle)
 	or_sess, or_cleanup, err := tc.GetSession()
 	defer or_cleanup()
 ```
@@ -258,7 +258,7 @@ import (
 			Hash:      tpm2.TPMAlgSHA256,
 			PCRSelect: tpm2.PCClientCompatible.PCRs(uint(23)),
 		},
-	}, nil, primaryKey.Name)
+	}, nil, primaryKey.Name, primaryKey.ObjectHandle)
 	or_sess, or_cleanup, err := se.GetSession()
 
 	defer or_cleanup()
