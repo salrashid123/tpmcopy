@@ -53,6 +53,10 @@ Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Pr
 | **`-tpm-path`** | Path to the TPM device (default: `/dev/tpmrm0`) |
 | **`-mode`** | Operation mode: `publickey duplicate import` (default: ``) |
 | **`-keyType`** | type of key to import/export (`rsa ecc aes hmac`) (default: "rsa") |
+| **`-rsaScheme`** | rsa Key Scheme (`rsassa rsapss`) (default: "rsassa") |
+| **`-hashScheme`** | hash Scheme (`sha256 sha384 sha512`) (default: "sha256") |
+| **`-eccScheme`** | ecc Key Alg (`ecc256 ecc384 ecc521`) (default: "ecc256") |
+| **`-keySize`** | AES key size (`128 256`) (default: "128") |
 | **`-out`** | File to write the file to import (default: `""`) |
 | **`-in`** | File to read the file to import (default: `""`) |
 | **`-pubout`** | Save the imported key as `TPM2B_PUBLIC` (default: `"`) |

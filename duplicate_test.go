@@ -290,14 +290,41 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 	rwrB := transport.FromReadWriter(tpmDeviceB)
 	defer tpmDeviceB.Close()
 
+	// $ swtpm_setup --print-capabilities | jq '.'
+	// {
+	//   "type": "swtpm_setup",
+	//   "features": [
+	//     "tpm-1.2",
+	//     "tpm-2.0",
+	//     "cmdarg-keyfile-fd",
+	//     "cmdarg-pwdfile-fd",
+	//     "tpm12-not-need-root",
+	//     "cmdarg-write-ek-cert-files",
+	//     "cmdarg-create-config-files",
+	//     "cmdarg-reconfigure-pcr-banks",
+	//     "tpm2-rsa-keysize-2048",
+	//     "tpm2-rsa-keysize-3072"
+	//   ],
+	//   "version": "0.7.1"
+	// }
+
 	tests := []struct {
-		name          string
-		userAuth      bool
-		password      string
-		shouldSucceed bool
+		name     string
+		password string
+
+		hsh     tpm2.TPMAlgID
+		alg     string
+		keyFile string
 	}{
-		{"UserWithAuthTrue", true, "bar", true},
-		{"UserWithAuthFalse", false, "bar", true},
+		{"SHA256RSASSA", "bar", tpm2.TPMAlgSHA256, "rsassa", "testdata/certs/key_rsa.pem"},
+
+		{"SHA256RSASSA_3072", "bar", tpm2.TPMAlgSHA256, "rsassa", "testdata/certs/key_rsa_3072.pem"},
+		{"SHA384RSASSA", "bar", tpm2.TPMAlgSHA384, "rsassa", "testdata/certs/key_rsa.pem"},
+		{"SHA512RSASSA", "bar", tpm2.TPMAlgSHA512, "rsassa", "testdata/certs/key_rsa.pem"},
+
+		{"SHA256RSAPSS", "bar", tpm2.TPMAlgSHA256, "rsapss", "testdata/certs/key_rsa.pem"},
+		{"SHA384RSAPSS", "bar", tpm2.TPMAlgSHA384, "rsapss", "testdata/certs/key_rsa.pem"},
+		{"SHA512RSAPSS", "bar", tpm2.TPMAlgSHA512, "rsapss", "testdata/certs/key_rsa.pem"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -315,8 +342,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 
 			/// now read the RSA private key to import/export
 
-			keyFile := "testdata/certs/key_rsa.pem"
-			kbytes, err := os.ReadFile(keyFile)
+			kbytes, err := os.ReadFile(tc.keyFile)
 			require.NoError(t, err)
 
 			block, _ := pem.Decode(kbytes)
@@ -329,6 +355,30 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 			rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
 			require.True(t, ok)
 
+			var sch tpm2.TPMTRSAScheme
+			switch tc.alg {
+			case "rsassa":
+				sch = tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSASSA,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSASSA,
+						&tpm2.TPMSSigSchemeRSASSA{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			case "rsapss":
+				sch = tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSAPSS,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSAPSS,
+						&tpm2.TPMSSigSchemeRSAPSS{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			}
+
 			dupKeyTemplate := tpm2.TPMTPublic{
 				Type:    tpm2.TPMAlgRSA,
 				NameAlg: tpm2.TPMAlgSHA256,
@@ -337,23 +387,15 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 					FixedTPM:            false,
 					FixedParent:         false,
 					SensitiveDataOrigin: false,
-					UserWithAuth:        tc.userAuth,
+					UserWithAuth:        true,
 				},
 
 				Parameters: tpm2.NewTPMUPublicParms(
 					tpm2.TPMAlgRSA,
 					&tpm2.TPMSRSAParms{
 						Exponent: uint32(rsaPrivateKey.PublicKey.E),
-						Scheme: tpm2.TPMTRSAScheme{
-							Scheme: tpm2.TPMAlgRSASSA,
-							Details: tpm2.NewTPMUAsymScheme(
-								tpm2.TPMAlgRSASSA,
-								&tpm2.TPMSSigSchemeRSASSA{
-									HashAlg: tpm2.TPMAlgSHA256,
-								},
-							),
-						},
-						KeyBits: 2048,
+						Scheme:   sch,
+						KeyBits:  tpm2.TPMIRSAKeyBits(rsaPrivateKey.N.BitLen()), //2048,
 					},
 				),
 
@@ -476,7 +518,10 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 
 			b := []byte(stringToSign)
 
-			h := sha256.New()
+			hh, err := tc.hsh.Hash()
+			require.NoError(t, err)
+
+			h := hh.New()
 			h.Write(b)
 			digest := h.Sum(nil)
 
@@ -485,6 +530,30 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 			or_sess, or_sess_cleanup, err := svc.GetSession()
 			require.NoError(t, err)
 			defer or_sess_cleanup()
+
+			var sigsch tpm2.TPMTSigScheme
+			switch tc.alg {
+			case "rsassa":
+				sigsch = tpm2.TPMTSigScheme{
+					Scheme: tpm2.TPMAlgRSASSA,
+					Details: tpm2.NewTPMUSigScheme(
+						tpm2.TPMAlgRSASSA,
+						&tpm2.TPMSSchemeHash{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			case "rsapss":
+				sigsch = tpm2.TPMTSigScheme{
+					Scheme: tpm2.TPMAlgRSAPSS,
+					Details: tpm2.NewTPMUSigScheme(
+						tpm2.TPMAlgRSAPSS,
+						&tpm2.TPMSSchemeHash{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			}
 
 			sign := tpm2.Sign{
 				KeyHandle: tpm2.AuthHandle{
@@ -495,26 +564,14 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 				Digest: tpm2.TPM2BDigest{
 					Buffer: digest[:],
 				},
-				InScheme: tpm2.TPMTSigScheme{
-					Scheme: tpm2.TPMAlgRSASSA,
-					Details: tpm2.NewTPMUSigScheme(
-						tpm2.TPMAlgRSASSA,
-						&tpm2.TPMSSchemeHash{
-							HashAlg: tpm2.TPMAlgSHA256,
-						},
-					),
-				},
+				InScheme: sigsch,
 				Validation: tpm2.TPMTTKHashCheck{
 					Tag: tpm2.TPMSTHashCheck,
 				},
 			}
 
 			_, err = sign.Execute(rwrB)
-			if tc.shouldSucceed {
-				require.NoError(t, err)
-			} else {
-				require.Error(t, err)
-			}
+			require.NoError(t, err)
 
 		})
 	}
@@ -1137,223 +1194,269 @@ func TestDuplicateECC(t *testing.T) {
 
 	///  now read the RSA private key to import/export
 
-	keyFile := "testdata/certs/key_ecc.pem"
-	kbytes, err := os.ReadFile(keyFile)
-	require.NoError(t, err)
+	tests := []struct {
+		name     string
+		password string
 
-	block, _ := pem.Decode(kbytes)
-	require.NoError(t, err)
+		hsh     tpm2.TPMAlgID
+		alg     string
+		crv     tpm2.TPMECCCurve
+		keyFile string
+	}{
+		{"prime256v1", "bar", tpm2.TPMAlgSHA256, "ecc256", tpm2.TPMECCNistP256, "testdata/certs/key_ecc.pem"},
+		{"secp384r1", "bar", tpm2.TPMAlgSHA384, "ecc384", tpm2.TPMECCNistP384, "testdata/certs/key_ecc_384.pem"},
+		{"secp521r1", "bar", tpm2.TPMAlgSHA512, "ecc521", tpm2.TPMECCNistP521, "testdata/certs/key_ecc_521.pem"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			kbytes, err := os.ReadFile(tc.keyFile)
+			require.NoError(t, err)
 
-	// Parse the PKCS#1 private key
-	privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	require.NoError(t, err)
+			block, _ := pem.Decode(kbytes)
+			require.NoError(t, err)
 
-	eccPriv, ok := privateKey.(*ecdsa.PrivateKey)
-	require.True(t, ok)
+			// Parse the PKCS#1 private key
+			privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			require.NoError(t, err)
 
-	pk := eccPriv.PublicKey
+			eccPriv, ok := privateKey.(*ecdsa.PrivateKey)
+			require.True(t, ok)
 
-	dupKeyTemplate := tpm2.TPMTPublic{
-		Type:    tpm2.TPMAlgECC,
-		NameAlg: tpm2.TPMAlgSHA256,
-		ObjectAttributes: tpm2.TPMAObject{
-			SignEncrypt:         true,
-			FixedTPM:            false,
-			FixedParent:         false,
-			SensitiveDataOrigin: false,
-			UserWithAuth:        false,
-		},
+			pk := eccPriv.PublicKey
 
-		Parameters: tpm2.NewTPMUPublicParms(
-			tpm2.TPMAlgECC,
-			&tpm2.TPMSECCParms{
-				CurveID: tpm2.TPMECCNistP256,
-				Scheme: tpm2.TPMTECCScheme{
+			var sch tpm2.TPMTECCScheme
+			switch tc.alg {
+			case "ecc256":
+				sch = tpm2.TPMTECCScheme{
 					Scheme: tpm2.TPMAlgECDSA,
 					Details: tpm2.NewTPMUAsymScheme(
 						tpm2.TPMAlgECDSA,
 						&tpm2.TPMSSigSchemeECDSA{
-							HashAlg: tpm2.TPMAlgSHA256,
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			case "ecc384":
+				sch = tpm2.TPMTECCScheme{
+					Scheme: tpm2.TPMAlgECDSA,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgECDSA,
+						&tpm2.TPMSSigSchemeECDSA{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			case "ecc521":
+				sch = tpm2.TPMTECCScheme{
+					Scheme: tpm2.TPMAlgECDSA,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgECDSA,
+						&tpm2.TPMSSigSchemeECDSA{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			}
+
+			dupKeyTemplate := tpm2.TPMTPublic{
+				Type:    tpm2.TPMAlgECC,
+				NameAlg: tpm2.TPMAlgSHA256,
+				ObjectAttributes: tpm2.TPMAObject{
+					SignEncrypt:         true,
+					FixedTPM:            false,
+					FixedParent:         false,
+					SensitiveDataOrigin: false,
+					UserWithAuth:        false,
+				},
+
+				Parameters: tpm2.NewTPMUPublicParms(
+					tpm2.TPMAlgECC,
+					&tpm2.TPMSECCParms{
+						CurveID: tc.crv,
+						Scheme:  sch,
+					},
+				),
+				Unique: tpm2.NewTPMUPublicID(
+					tpm2.TPMAlgECC,
+					&tpm2.TPMSECCPoint{
+						X: tpm2.TPM2BECCParameter{
+							Buffer: pk.X.FillBytes(make([]byte, len(pk.X.Bytes()))), //pk.X.Bytes(), // pk.X.FillBytes(make([]byte, len(pk.X.Bytes()))),
+						},
+						Y: tpm2.TPM2BECCParameter{
+							Buffer: pk.Y.FillBytes(make([]byte, len(pk.Y.Bytes()))), //pk.Y.Bytes(), // pk.Y.FillBytes(make([]byte, len(pk.Y.Bytes()))),
+						},
+					},
+				),
+			}
+
+			sens2B := tpm2.TPMTSensitive{
+				SensitiveType: tpm2.TPMAlgECC,
+				AuthValue: tpm2.TPM2BAuth{
+					Buffer: []byte(password), // set any userAuth
+				},
+
+				Sensitive: tpm2.NewTPMUSensitiveComposite(
+					tpm2.TPMAlgECC,
+					&tpm2.TPM2BECCParameter{Buffer: eccPriv.D.FillBytes(make([]byte, len(eccPriv.D.Bytes())))},
+				),
+			}
+
+			s, err := Duplicate(ekPububFromPEMTemplate, duplicatepb.Secret_ECC, duplicatepb.Secret_EndorsementRSA, "", dupKeyTemplate, sens2B, nil)
+			require.NoError(t, err)
+
+			/// now import
+
+			sessionEncryptionRspB, err := tpm2.CreatePrimary{
+				PrimaryHandle: tpm2.TPMRHEndorsement,
+				InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+			defer func() {
+				_, _ = tpm2.FlushContext{
+					FlushHandle: sessionEncryptionRspB.ObjectHandle,
+				}.Execute(rwrB)
+			}()
+
+			key, err := Import(&TPMConfig{
+				TPMDevice:               tpmDeviceB,
+				SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
+			}, ekHandle, s)
+			require.NoError(t, err)
+
+			_, _ = tpm2.FlushContext{
+				FlushHandle: sessionEncryptionRspB.ObjectHandle,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			// now load the key
+
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: ekHandleB,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			pubEKB, err := tpm2.ReadPublic{
+				ObjectHandle: ekHandleB,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			load_session, load_session_cleanup, err := tpm2.PolicySession(rwrB, tpm2.TPMAlgSHA256, 16)
+			require.NoError(t, err)
+			defer load_session_cleanup()
+
+			_, err = tpm2.PolicySecret{
+				AuthHandle: tpm2.AuthHandle{
+					Handle: tpm2.TPMRHEndorsement,
+					Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+					Auth:   tpm2.PasswordAuth(nil),
+				},
+				PolicySession: load_session.Handle(),
+				NonceTPM:      load_session.NonceTPM(),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			regenECCKey, err := tpm2.Load{
+				ParentHandle: tpm2.AuthHandle{
+					Handle: ekHandleB,
+					Name:   pubEKB.Name,
+					Auth:   load_session,
+				},
+				InPublic:  key.Pubkey,
+				InPrivate: key.Privkey,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: regenECCKey.ObjectHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			ppub, err := tpm2.ReadPublic{
+				ObjectHandle: tpm2.TPMIDHObject(regenECCKey.ObjectHandle),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+			outPub, err := ppub.OutPublic.Contents()
+			require.NoError(t, err)
+			ecDetail, err := outPub.Parameters.ECCDetail()
+			require.NoError(t, err)
+			crv, err := ecDetail.CurveID.Curve()
+			require.NoError(t, err)
+
+			eccUnique, err := outPub.Unique.ECC()
+			require.NoError(t, err)
+
+			eccPubregen := &ecdsa.PublicKey{
+				Curve: crv,
+				X:     big.NewInt(0).SetBytes(eccUnique.X.Buffer),
+				Y:     big.NewInt(0).SetBytes(eccUnique.Y.Buffer),
+			}
+
+			require.NoError(t, err)
+
+			require.Equal(t, eccPubregen, &eccPriv.PublicKey)
+
+			stringToSign := "foo"
+
+			b := []byte(stringToSign)
+
+			hh, err := tc.hsh.Hash()
+			require.NoError(t, err)
+
+			h := hh.New()
+			h.Write(b)
+			digest := h.Sum(nil)
+
+			svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
+			require.NoError(t, err)
+			or_sess, or_sess_cleanup, err := svc.GetSession()
+			require.NoError(t, err)
+			defer or_sess_cleanup()
+
+			sign := tpm2.Sign{
+				KeyHandle: tpm2.AuthHandle{
+					Handle: regenECCKey.ObjectHandle,
+					Name:   regenECCKey.Name,
+					Auth:   or_sess, //tpm2.PasswordAuth(nil),
+				},
+				Digest: tpm2.TPM2BDigest{
+					Buffer: digest[:],
+				},
+				InScheme: tpm2.TPMTSigScheme{
+					Scheme: tpm2.TPMAlgECDSA,
+					Details: tpm2.NewTPMUSigScheme(
+						tpm2.TPMAlgECDSA,
+						&tpm2.TPMSSchemeHash{
+							HashAlg: tc.hsh,
 						},
 					),
 				},
-			},
-		),
-		Unique: tpm2.NewTPMUPublicID(
-			tpm2.TPMAlgECC,
-			&tpm2.TPMSECCPoint{
-				X: tpm2.TPM2BECCParameter{
-					Buffer: pk.X.FillBytes(make([]byte, len(pk.X.Bytes()))), //pk.X.Bytes(), // pk.X.FillBytes(make([]byte, len(pk.X.Bytes()))),
+				Validation: tpm2.TPMTTKHashCheck{
+					Tag: tpm2.TPMSTHashCheck,
 				},
-				Y: tpm2.TPM2BECCParameter{
-					Buffer: pk.Y.FillBytes(make([]byte, len(pk.Y.Bytes()))), //pk.Y.Bytes(), // pk.Y.FillBytes(make([]byte, len(pk.Y.Bytes()))),
-				},
-			},
-		),
+			}
+
+			eccSign, err := sign.Execute(rwrB)
+			require.NoError(t, err)
+
+			ecs, err := eccSign.Signature.Signature.ECDSA()
+			require.NoError(t, err)
+
+			x := big.NewInt(0).SetBytes(ecs.SignatureR.Buffer)
+			y := big.NewInt(0).SetBytes(ecs.SignatureS.Buffer)
+
+			ok = ecdsa.Verify(eccPubregen, digest[:], x, y)
+			require.True(t, ok)
+
+		})
 	}
 
-	sens2B := tpm2.TPMTSensitive{
-		SensitiveType: tpm2.TPMAlgECC,
-		AuthValue: tpm2.TPM2BAuth{
-			Buffer: []byte(password), // set any userAuth
-		},
-
-		Sensitive: tpm2.NewTPMUSensitiveComposite(
-			tpm2.TPMAlgECC,
-			&tpm2.TPM2BECCParameter{Buffer: eccPriv.D.FillBytes(make([]byte, len(eccPriv.D.Bytes())))},
-		),
-	}
-
-	s, err := Duplicate(ekPububFromPEMTemplate, duplicatepb.Secret_ECC, duplicatepb.Secret_EndorsementRSA, "", dupKeyTemplate, sens2B, nil)
-	require.NoError(t, err)
-
-	/// now import
-
-	sessionEncryptionRspB, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
-		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
-	}.Execute(rwrB)
-	require.NoError(t, err)
-	defer func() {
-		_, _ = tpm2.FlushContext{
-			FlushHandle: sessionEncryptionRspB.ObjectHandle,
-		}.Execute(rwrB)
-	}()
-
-	key, err := Import(&TPMConfig{
-		TPMDevice:               tpmDeviceB,
-		SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
-	}, ekHandle, s)
-	require.NoError(t, err)
-
-	_, _ = tpm2.FlushContext{
-		FlushHandle: sessionEncryptionRspB.ObjectHandle,
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	// now load the key
-
-	_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
-	require.NoError(t, err)
-
-	defer func() {
-		flushContextCmd := tpm2.FlushContext{
-			FlushHandle: ekHandleB,
-		}
-		_, _ = flushContextCmd.Execute(rwrB)
-	}()
-
-	pubEKB, err := tpm2.ReadPublic{
-		ObjectHandle: ekHandleB,
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	load_session, load_session_cleanup, err := tpm2.PolicySession(rwrB, tpm2.TPMAlgSHA256, 16)
-	require.NoError(t, err)
-	defer load_session_cleanup()
-
-	_, err = tpm2.PolicySecret{
-		AuthHandle: tpm2.AuthHandle{
-			Handle: tpm2.TPMRHEndorsement,
-			Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
-			Auth:   tpm2.PasswordAuth(nil),
-		},
-		PolicySession: load_session.Handle(),
-		NonceTPM:      load_session.NonceTPM(),
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	regenECCKey, err := tpm2.Load{
-		ParentHandle: tpm2.AuthHandle{
-			Handle: ekHandleB,
-			Name:   pubEKB.Name,
-			Auth:   load_session,
-		},
-		InPublic:  key.Pubkey,
-		InPrivate: key.Privkey,
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	defer func() {
-		flushContextCmd := tpm2.FlushContext{
-			FlushHandle: regenECCKey.ObjectHandle,
-		}
-		_, _ = flushContextCmd.Execute(rwrB)
-	}()
-
-	ppub, err := tpm2.ReadPublic{
-		ObjectHandle: tpm2.TPMIDHObject(regenECCKey.ObjectHandle),
-	}.Execute(rwrB)
-	require.NoError(t, err)
-	outPub, err := ppub.OutPublic.Contents()
-	require.NoError(t, err)
-	ecDetail, err := outPub.Parameters.ECCDetail()
-	require.NoError(t, err)
-	crv, err := ecDetail.CurveID.Curve()
-	require.NoError(t, err)
-
-	eccUnique, err := outPub.Unique.ECC()
-	require.NoError(t, err)
-
-	eccPubregen := &ecdsa.PublicKey{
-		Curve: crv,
-		X:     big.NewInt(0).SetBytes(eccUnique.X.Buffer),
-		Y:     big.NewInt(0).SetBytes(eccUnique.Y.Buffer),
-	}
-
-	require.NoError(t, err)
-
-	require.Equal(t, eccPubregen, &eccPriv.PublicKey)
-
-	stringToSign := "foo"
-
-	b := []byte(stringToSign)
-
-	h := sha256.New()
-	h.Write(b)
-	digest := h.Sum(nil)
-
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
-	require.NoError(t, err)
-	or_sess, or_sess_cleanup, err := svc.GetSession()
-	require.NoError(t, err)
-	defer or_sess_cleanup()
-
-	sign := tpm2.Sign{
-		KeyHandle: tpm2.AuthHandle{
-			Handle: regenECCKey.ObjectHandle,
-			Name:   regenECCKey.Name,
-			Auth:   or_sess, //tpm2.PasswordAuth(nil),
-		},
-		Digest: tpm2.TPM2BDigest{
-			Buffer: digest[:],
-		},
-		InScheme: tpm2.TPMTSigScheme{
-			Scheme: tpm2.TPMAlgECDSA,
-			Details: tpm2.NewTPMUSigScheme(
-				tpm2.TPMAlgECDSA,
-				&tpm2.TPMSSchemeHash{
-					HashAlg: tpm2.TPMAlgSHA256,
-				},
-			),
-		},
-		Validation: tpm2.TPMTTKHashCheck{
-			Tag: tpm2.TPMSTHashCheck,
-		},
-	}
-
-	eccSign, err := sign.Execute(rwrB)
-
-	require.NoError(t, err)
-
-	ecs, err := eccSign.Signature.Signature.ECDSA()
-	require.NoError(t, err)
-
-	x := big.NewInt(0).SetBytes(ecs.SignatureR.Buffer)
-	y := big.NewInt(0).SetBytes(ecs.SignatureS.Buffer)
-
-	ok = ecdsa.Verify(eccPubregen, digest[:], x, y)
-	require.True(t, ok)
 }
 
 func TestDuplicateAES(t *testing.T) {
@@ -1413,187 +1516,200 @@ func TestDuplicateAES(t *testing.T) {
 		require.Fail(t, "unknonw public key type %v", pub)
 	}
 	///  now read the RSA private key to import/export
+	tests := []struct {
+		name string
 
-	keyFile := "testdata/certs/aes.key"
-	kbytes, err := os.ReadFile(keyFile)
-	require.NoError(t, err)
+		alg     tpm2.TPMAlgID
+		keyFile string
+	}{
+		{"cfb_128", tpm2.TPMAlgCFB, "testdata/certs/aes.key"},
+		{"cfb_256", tpm2.TPMAlgCFB, "testdata/certs/aes_256.key"},
+		{"cbc_128", tpm2.TPMAlgCBC, "testdata/certs/aes.key"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// keyFile := "testdata/certs/aes.key"
+			kbytes, err := os.ReadFile(tc.keyFile)
+			require.NoError(t, err)
 
-	keySensitive, err := hex.DecodeString(string(kbytes))
-	require.NoError(t, err)
+			keySensitive, err := hex.DecodeString(string(kbytes))
+			require.NoError(t, err)
 
-	sv := make([]byte, 32)
-	io.ReadFull(rand.Reader, sv)
-	privHash := crypto.SHA256.New()
-	privHash.Write(sv)
-	privHash.Write(keySensitive)
+			sv := make([]byte, 32)
+			io.ReadFull(rand.Reader, sv)
+			privHash := crypto.SHA256.New()
+			privHash.Write(sv)
+			privHash.Write(keySensitive)
 
-	dupKeyTemplate := tpm2.TPMTPublic{
-		Type:    tpm2.TPMAlgSymCipher,
-		NameAlg: tpm2.TPMAlgSHA256,
-		ObjectAttributes: tpm2.TPMAObject{
-			FixedTPM:            false,
-			FixedParent:         false,
-			SensitiveDataOrigin: false,
-			UserWithAuth:        false,
-			SignEncrypt:         true,
-			Decrypt:             true,
-		},
-
-		Parameters: tpm2.NewTPMUPublicParms(
-			tpm2.TPMAlgSymCipher,
-			&tpm2.TPMSSymCipherParms{
-				Sym: tpm2.TPMTSymDefObject{
-					Algorithm: tpm2.TPMAlgAES,
-					Mode:      tpm2.NewTPMUSymMode(tpm2.TPMAlgAES, tpm2.TPMAlgCFB),
-					KeyBits: tpm2.NewTPMUSymKeyBits(
-						tpm2.TPMAlgAES,
-						tpm2.TPMKeyBits(128),
-					),
+			dupKeyTemplate := tpm2.TPMTPublic{
+				Type:    tpm2.TPMAlgSymCipher,
+				NameAlg: tpm2.TPMAlgSHA256,
+				ObjectAttributes: tpm2.TPMAObject{
+					FixedTPM:            false,
+					FixedParent:         false,
+					SensitiveDataOrigin: false,
+					UserWithAuth:        false,
+					SignEncrypt:         true,
+					Decrypt:             true,
 				},
-			},
-		),
-		Unique: tpm2.NewTPMUPublicID(
-			tpm2.TPMAlgSymCipher,
-			&tpm2.TPM2BDigest{
-				Buffer: privHash.Sum(nil),
-			},
-		),
+
+				Parameters: tpm2.NewTPMUPublicParms(
+					tpm2.TPMAlgSymCipher,
+					&tpm2.TPMSSymCipherParms{
+						Sym: tpm2.TPMTSymDefObject{
+							Algorithm: tpm2.TPMAlgAES,
+							Mode:      tpm2.NewTPMUSymMode(tpm2.TPMAlgAES, tc.alg),
+							KeyBits: tpm2.NewTPMUSymKeyBits(
+								tpm2.TPMAlgAES,
+								tpm2.TPMKeyBits(len(keySensitive)*8),
+							),
+						},
+					},
+				),
+				Unique: tpm2.NewTPMUPublicID(
+					tpm2.TPMAlgSymCipher,
+					&tpm2.TPM2BDigest{
+						Buffer: privHash.Sum(nil),
+					},
+				),
+			}
+
+			sens2B := tpm2.TPMTSensitive{
+				SensitiveType: tpm2.TPMAlgSymCipher,
+				AuthValue: tpm2.TPM2BAuth{
+					Buffer: []byte(password),
+				},
+				SeedValue: tpm2.TPM2BDigest{
+					Buffer: sv,
+				},
+				Sensitive: tpm2.NewTPMUSensitiveComposite(
+					tpm2.TPMAlgSymCipher,
+					&tpm2.TPM2BSymKey{Buffer: keySensitive},
+				),
+			}
+
+			s, err := Duplicate(ekPububFromPEMTemplate, duplicatepb.Secret_AES, duplicatepb.Secret_EndorsementRSA, "", dupKeyTemplate, sens2B, nil)
+
+			require.NoError(t, err)
+
+			/// now import
+
+			sessionEncryptionRspB, err := tpm2.CreatePrimary{
+				PrimaryHandle: tpm2.TPMRHEndorsement,
+				InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+			defer func() {
+				_, _ = tpm2.FlushContext{
+					FlushHandle: sessionEncryptionRspB.ObjectHandle,
+				}.Execute(rwrB)
+			}()
+
+			key, err := Import(&TPMConfig{
+				TPMDevice:               tpmDeviceB,
+				SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
+			}, ekHandle, s)
+			require.NoError(t, err)
+
+			_, _ = tpm2.FlushContext{
+				FlushHandle: sessionEncryptionRspB.ObjectHandle,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			// now load the key
+
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: ekHandleB,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			pubEKB, err := tpm2.ReadPublic{
+				ObjectHandle: ekHandleB,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			load_session, load_session_cleanup, err := tpm2.PolicySession(rwrB, tpm2.TPMAlgSHA256, 16)
+			require.NoError(t, err)
+			defer load_session_cleanup()
+
+			_, err = tpm2.PolicySecret{
+				AuthHandle: tpm2.AuthHandle{
+					Handle: tpm2.TPMRHEndorsement,
+					Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
+					Auth:   tpm2.PasswordAuth(nil),
+				},
+				PolicySession: load_session.Handle(),
+				NonceTPM:      load_session.NonceTPM(),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			regenAESKey, err := tpm2.Load{
+				ParentHandle: tpm2.AuthHandle{
+					Handle: ekHandleB,
+					Name:   pubEKB.Name,
+					Auth:   load_session,
+				},
+				InPublic:  key.Pubkey,
+				InPrivate: key.Privkey,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: regenAESKey.ObjectHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			stringToEncrypt := "00000000fooooooo"
+
+			data := []byte(stringToEncrypt)
+
+			iv := make([]byte, aes.BlockSize)
+			_, err = io.ReadFull(rand.Reader, iv)
+			require.NoError(t, err)
+
+			svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
+			require.NoError(t, err)
+			or_sess, or_sess_cleanup, err := svc.GetSession()
+			require.NoError(t, err)
+			defer or_sess_cleanup()
+
+			keyAuth := tpm2.AuthHandle{
+				Handle: regenAESKey.ObjectHandle,
+				Name:   regenAESKey.Name,
+				Auth:   or_sess, //tpm2.PasswordAuth([]byte(nil)),
+			}
+			encrypted, err := encryptDecryptSymmetric(rwrB, tc.alg, keyAuth, iv, data, false)
+			require.NoError(t, err)
+
+			svc, err = NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
+			require.NoError(t, err)
+			or_sess, or_sess_cleanup, err = svc.GetSession()
+			require.NoError(t, err)
+			defer or_sess_cleanup()
+
+			keyAuth = tpm2.AuthHandle{
+				Handle: regenAESKey.ObjectHandle,
+				Name:   regenAESKey.Name,
+				Auth:   or_sess, //tpm2.PasswordAuth([]byte(nil)),
+			}
+
+			decrypted, err := encryptDecryptSymmetric(rwrB, tc.alg, keyAuth, iv, encrypted, true)
+			require.NoError(t, err)
+
+			require.Equal(t, decrypted, data)
+		})
 	}
-
-	sens2B := tpm2.TPMTSensitive{
-		SensitiveType: tpm2.TPMAlgSymCipher,
-		AuthValue: tpm2.TPM2BAuth{
-			Buffer: []byte(password),
-		},
-		SeedValue: tpm2.TPM2BDigest{
-			Buffer: sv,
-		},
-		Sensitive: tpm2.NewTPMUSensitiveComposite(
-			tpm2.TPMAlgSymCipher,
-			&tpm2.TPM2BSymKey{Buffer: keySensitive},
-		),
-	}
-
-	s, err := Duplicate(ekPububFromPEMTemplate, duplicatepb.Secret_AES, duplicatepb.Secret_EndorsementRSA, "", dupKeyTemplate, sens2B, nil)
-
-	require.NoError(t, err)
-
-	/// now import
-
-	sessionEncryptionRspB, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
-		InPublic:      tpm2.New2B(tpm2.RSAEKTemplate),
-	}.Execute(rwrB)
-	require.NoError(t, err)
-	defer func() {
-		_, _ = tpm2.FlushContext{
-			FlushHandle: sessionEncryptionRspB.ObjectHandle,
-		}.Execute(rwrB)
-	}()
-
-	key, err := Import(&TPMConfig{
-		TPMDevice:               tpmDeviceB,
-		SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
-	}, ekHandle, s)
-	require.NoError(t, err)
-
-	_, _ = tpm2.FlushContext{
-		FlushHandle: sessionEncryptionRspB.ObjectHandle,
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	// now load the key
-
-	_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
-	require.NoError(t, err)
-
-	defer func() {
-		flushContextCmd := tpm2.FlushContext{
-			FlushHandle: ekHandleB,
-		}
-		_, _ = flushContextCmd.Execute(rwrB)
-	}()
-
-	pubEKB, err := tpm2.ReadPublic{
-		ObjectHandle: ekHandleB,
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	load_session, load_session_cleanup, err := tpm2.PolicySession(rwrB, tpm2.TPMAlgSHA256, 16)
-	require.NoError(t, err)
-	defer load_session_cleanup()
-
-	_, err = tpm2.PolicySecret{
-		AuthHandle: tpm2.AuthHandle{
-			Handle: tpm2.TPMRHEndorsement,
-			Name:   tpm2.HandleName(tpm2.TPMRHEndorsement),
-			Auth:   tpm2.PasswordAuth(nil),
-		},
-		PolicySession: load_session.Handle(),
-		NonceTPM:      load_session.NonceTPM(),
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	regenAESKey, err := tpm2.Load{
-		ParentHandle: tpm2.AuthHandle{
-			Handle: ekHandleB,
-			Name:   pubEKB.Name,
-			Auth:   load_session,
-		},
-		InPublic:  key.Pubkey,
-		InPrivate: key.Privkey,
-	}.Execute(rwrB)
-	require.NoError(t, err)
-
-	defer func() {
-		flushContextCmd := tpm2.FlushContext{
-			FlushHandle: regenAESKey.ObjectHandle,
-		}
-		_, _ = flushContextCmd.Execute(rwrB)
-	}()
-
-	stringToEncrypt := "foo"
-
-	data := []byte(stringToEncrypt)
-
-	iv := make([]byte, aes.BlockSize)
-	_, err = io.ReadFull(rand.Reader, iv)
-	require.NoError(t, err)
-
-	svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
-	require.NoError(t, err)
-	or_sess, or_sess_cleanup, err := svc.GetSession()
-	require.NoError(t, err)
-	defer or_sess_cleanup()
-
-	keyAuth := tpm2.AuthHandle{
-		Handle: regenAESKey.ObjectHandle,
-		Name:   regenAESKey.Name,
-		Auth:   or_sess, //tpm2.PasswordAuth([]byte(nil)),
-	}
-	encrypted, err := encryptDecryptSymmetric(rwrB, keyAuth, iv, data, false)
-	require.NoError(t, err)
-
-	svc, err = NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(password), pubEKB.Name, ekHandle)
-	require.NoError(t, err)
-	or_sess, or_sess_cleanup, err = svc.GetSession()
-	require.NoError(t, err)
-	defer or_sess_cleanup()
-
-	keyAuth = tpm2.AuthHandle{
-		Handle: regenAESKey.ObjectHandle,
-		Name:   regenAESKey.Name,
-		Auth:   or_sess, //tpm2.PasswordAuth([]byte(nil)),
-	}
-
-	decrypted, err := encryptDecryptSymmetric(rwrB, keyAuth, iv, encrypted, true)
-	require.NoError(t, err)
-
-	require.Equal(t, decrypted, data)
 
 }
 
-func encryptDecryptSymmetric(rwr transport.TPM, keyAuth tpm2.AuthHandle, iv, data []byte, decrypt bool) ([]byte, error) {
+func encryptDecryptSymmetric(rwr transport.TPM, mode tpm2.TPMAlgID, keyAuth tpm2.AuthHandle, iv, data []byte, decrypt bool) ([]byte, error) {
 	var out, block []byte
 
 	for rest := data; len(rest) > 0; {
@@ -1607,7 +1723,7 @@ func encryptDecryptSymmetric(rwr transport.TPM, keyAuth tpm2.AuthHandle, iv, dat
 			Message: tpm2.TPM2BMaxBuffer{
 				Buffer: block,
 			},
-			Mode:    tpm2.TPMAlgCFB,
+			Mode:    mode,
 			Decrypt: decrypt,
 			IV: tpm2.TPM2BIV{
 				Buffer: iv,

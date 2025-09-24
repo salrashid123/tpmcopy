@@ -36,9 +36,15 @@ var (
 
 	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
 
-	keyType          = flag.String("keyType", "type of key to duplicate", "rsa|ecc|aes|hmac|seal")
+	keyType          = flag.String("keyType", "", "type of key to duplicate rsa|ecc|aes|hmac|seal")
 	keyName          = flag.String("keyName", "", "User defined description of the key to export")
 	tpmPublicKeyFile = flag.String("tpmPublicKeyFile", "/tmp/public.pem", "File to write the public key to (default /tmp/public.pem)")
+
+	rsaScheme  = flag.String("rsaScheme", "rsassa", "rsassa|rsapss (default rsassa)")
+	hashScheme = flag.String("hashScheme", "sha256", "sha256|sha384|sha512 (default sha256)")
+	eccScheme  = flag.String("eccScheme", "ecc256", "ecc256|ecc384|ecc521 (default ecc256)")
+
+	keySize = flag.Uint("keySize", 128, "128 | 256 (default 128)")
 
 	sessionEncryptionName = flag.String("tpm-session-encrypt-with-name", "", "hex encoded TPM object 'name' to use with an encrypted session")
 	pcrValues             = flag.String("pcrValues", "", "PCR Bound value (increasing order, comma separated)")
@@ -178,6 +184,19 @@ func run() int {
 			}
 		}
 
+		var hsh tpm2.TPMAlgID
+		switch *hashSchme {
+		case "sha256":
+			hsh = tpm2.TPMAlgSHA256
+		case "sha384":
+			hsh = tpm2.TPMAlgSHA384
+		case "sha512":
+			hsh = tpm2.TPMAlgSHA512
+		default:
+			fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashSchme)
+			return 1
+		}
+
 		var dupKeyTemplate tpm2.TPMTPublic
 		var sens2B tpm2.TPMTSensitive
 		var kt duplicatepb.Secret_KeyType
@@ -197,6 +216,33 @@ func run() int {
 				return 1
 			}
 
+			var sch tpm2.TPMTRSAScheme
+			switch *rsaScheme {
+			case "rsassa":
+				sch = tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSASSA,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSASSA,
+						&tpm2.TPMSSigSchemeRSASSA{
+							HashAlg: hsh,
+						},
+					),
+				}
+			case "rsapss":
+				sch = tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSAPSS,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSAPSS,
+						&tpm2.TPMSSigSchemeRSAPSS{
+							HashAlg: hsh,
+						},
+					),
+				}
+			default:
+				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashSchme)
+				return 1
+			}
+
 			dupKeyTemplate = tpm2.TPMTPublic{
 				Type:    tpm2.TPMAlgRSA,
 				NameAlg: tpm2.TPMAlgSHA256,
@@ -212,16 +258,8 @@ func run() int {
 					tpm2.TPMAlgRSA,
 					&tpm2.TPMSRSAParms{
 						Exponent: uint32(rsaPriv.PublicKey.E),
-						Scheme: tpm2.TPMTRSAScheme{
-							Scheme: tpm2.TPMAlgRSASSA,
-							Details: tpm2.NewTPMUAsymScheme(
-								tpm2.TPMAlgRSASSA,
-								&tpm2.TPMSSigSchemeRSASSA{
-									HashAlg: tpm2.TPMAlgSHA256,
-								},
-							),
-						},
-						KeyBits: 2048,
+						Scheme:   sch,
+						KeyBits:  tpm2.TPMIRSAKeyBits(rsaPriv.N.BitLen()), // 2048,
 					},
 				),
 
@@ -263,6 +301,61 @@ func run() int {
 			}
 			pk := eccPriv.PublicKey
 
+			var sch tpm2.TPMUPublicParms
+			switch *eccScheme {
+			case "ecc256":
+				sch = tpm2.NewTPMUPublicParms(
+					tpm2.TPMAlgECC,
+					&tpm2.TPMSECCParms{
+						CurveID: tpm2.TPMECCNistP256,
+						Scheme: tpm2.TPMTECCScheme{
+							Scheme: tpm2.TPMAlgECDSA,
+							Details: tpm2.NewTPMUAsymScheme(
+								tpm2.TPMAlgECDSA,
+								&tpm2.TPMSSigSchemeECDSA{
+									HashAlg: hsh,
+								},
+							),
+						},
+					},
+				)
+			case "ecc384":
+				sch = tpm2.NewTPMUPublicParms(
+					tpm2.TPMAlgECC,
+					&tpm2.TPMSECCParms{
+						CurveID: tpm2.TPMECCNistP384,
+						Scheme: tpm2.TPMTECCScheme{
+							Scheme: tpm2.TPMAlgECDSA,
+							Details: tpm2.NewTPMUAsymScheme(
+								tpm2.TPMAlgECDSA,
+								&tpm2.TPMSSigSchemeECDSA{
+									HashAlg: hsh,
+								},
+							),
+						},
+					},
+				)
+			case "ecc521":
+				sch = tpm2.NewTPMUPublicParms(
+					tpm2.TPMAlgECC,
+					&tpm2.TPMSECCParms{
+						CurveID: tpm2.TPMECCNistP521,
+						Scheme: tpm2.TPMTECCScheme{
+							Scheme: tpm2.TPMAlgECDSA,
+							Details: tpm2.NewTPMUAsymScheme(
+								tpm2.TPMAlgECDSA,
+								&tpm2.TPMSSigSchemeECDSA{
+									HashAlg: hsh,
+								},
+							),
+						},
+					},
+				)
+			default:
+				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashSchme)
+				return 1
+			}
+
 			dupKeyTemplate = tpm2.TPMTPublic{
 				Type:    tpm2.TPMAlgECC,
 				NameAlg: tpm2.TPMAlgSHA256,
@@ -274,21 +367,7 @@ func run() int {
 					SignEncrypt:         true,
 				},
 				AuthPolicy: tpm2.TPM2BDigest{},
-				Parameters: tpm2.NewTPMUPublicParms(
-					tpm2.TPMAlgECC,
-					&tpm2.TPMSECCParms{
-						CurveID: tpm2.TPMECCNistP256,
-						Scheme: tpm2.TPMTECCScheme{
-							Scheme: tpm2.TPMAlgECDSA,
-							Details: tpm2.NewTPMUAsymScheme(
-								tpm2.TPMAlgECDSA,
-								&tpm2.TPMSSigSchemeECDSA{
-									HashAlg: tpm2.TPMAlgSHA256,
-								},
-							),
-						},
-					},
-				),
+				Parameters: sch,
 				Unique: tpm2.NewTPMUPublicID(
 					tpm2.TPMAlgECC,
 					&tpm2.TPMSECCPoint{
@@ -350,7 +429,7 @@ func run() int {
 							Scheme: tpm2.TPMAlgHMAC,
 							Details: tpm2.NewTPMUSchemeKeyedHash(tpm2.TPMAlgHMAC,
 								&tpm2.TPMSSchemeHMAC{
-									HashAlg: tpm2.TPMAlgSHA256,
+									HashAlg: hsh,
 								}),
 						},
 					}),
@@ -416,7 +495,7 @@ func run() int {
 							Mode:      tpm2.NewTPMUSymMode(tpm2.TPMAlgAES, tpm2.TPMAlgCFB),
 							KeyBits: tpm2.NewTPMUSymKeyBits(
 								tpm2.TPMAlgAES,
-								tpm2.TPMKeyBits(128),
+								tpm2.TPMKeyBits(*keySize),
 							),
 						},
 					},
