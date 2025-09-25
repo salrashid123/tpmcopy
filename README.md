@@ -114,7 +114,7 @@ go run cmd/main.go --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tm
 ###  copy public.pem to Local
 
 ### local
-go run cmd/main.go --mode duplicate --keyType=rsa --secret=/tmp/key_rsa.pem \
+go run cmd/main.go --mode duplicate --keyType=rsa --secret=/tmp/key_rsa.pem --rsaScheme=rsassa --hashScheme=sha256 \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
 ###  copy /tmp/out.json to TPM-B
@@ -142,7 +142,7 @@ go run cmd/main.go --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tm
 ###  copy public.pem to Local
 
 ## Password
-go run cmd/main.go --mode duplicate --keyType=ecc --secret=/tmp/key_ecc.pem \
+go run cmd/main.go --mode duplicate --keyType=ecc --secret=/tmp/key_ecc.pem --eccScheme=ecc256 --hashScheme=sha256 \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
 ###  copy /tmp/out.json to TPM-B
@@ -171,7 +171,7 @@ go run cmd/main.go --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tm
 ###  copy  public.pem to local
 
 ### Local
-go run cmd/main.go --mode duplicate --keyType=aes --secret=/tmp/aes.key \
+go run cmd/main.go --mode duplicate --keyType=aes --keySize=128 --secret=/tmp/aes.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
 ###  copy /tmp/out.json to TPM-B
