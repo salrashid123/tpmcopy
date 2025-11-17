@@ -62,18 +62,10 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 
 	// check if the key is either rsa or ecc
 
-	isRSA := true
-	_, err = pub.Parameters.RSADetail()
-	if err != nil {
-		_, err = pub.Parameters.ECCDetail()
-		if err != nil {
-			return nil, fmt.Errorf("provided handle must be either an RSA or ECC key: %v", err)
-		}
-		isRSA = false
-	}
-
 	var b []byte
-	if isRSA {
+
+	switch pub.Type {
+	case tpm2.TPMAlgRSA:
 		rsaDetail, err := pub.Parameters.RSADetail()
 		if err != nil {
 			return nil, fmt.Errorf("can't read RSA details %v", err)
@@ -92,7 +84,7 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to convert RSA  PublicKey: %v", err)
 		}
-	} else {
+	case tpm2.TPMAlgECC:
 		ecDetail, err := pub.Parameters.ECCDetail()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ecc public: %v", err)
@@ -116,7 +108,10 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to convert ECC PublicKey: %v", err)
 		}
+	default:
+		fmt.Fprintf(os.Stdout, "unsupported public key type %v", pub)
 	}
+
 	akPubPEM := pem.EncodeToMemory(
 		&pem.Block{
 			Type:  "PUBLIC KEY",
@@ -498,9 +493,14 @@ func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secre
 		ap = nil
 	}
 
+	emptyAuth := true
+	if len(dupSensitive.AuthValue.Buffer) > 0 {
+		emptyAuth = false
+	}
+
 	tkey := keyfile.TPMKey{
 		Keytype:   keyfile.OIDImportableKey,
-		EmptyAuth: true,
+		EmptyAuth: emptyAuth,
 		Parent:    tpm2.TPMRHFWOwner,
 		Policy:    ap,
 		Secret:    tpm2.TPM2BEncryptedSecret{Buffer: dupSeed},

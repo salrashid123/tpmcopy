@@ -43,6 +43,7 @@ var (
 	rsaScheme  = flag.String("rsaScheme", "rsassa", "rsassa|rsapss (default rsassa)")
 	hashScheme = flag.String("hashScheme", "sha256", "sha256|sha384|sha512 (default sha256)")
 	eccScheme  = flag.String("eccScheme", "ecc256", "ecc256|ecc384|ecc521 (default ecc256)")
+	aesScheme  = flag.String("aesScheme", "cfb", "cbf|cbc|ctr (default cbf)")
 
 	keySize = flag.Uint("keySize", 128, "128 | 256 (default 128)")
 
@@ -89,13 +90,13 @@ func run() int {
 	if *mode == "duplicate" {
 
 		if *tpmPublicKeyFile == "" || *secret == "" || *out == "" {
-			fmt.Fprintf(os.Stdout, "tpmPublicKeyFile, secret and out  parameters must be specified")
+			fmt.Fprintf(os.Stderr, "tpmPublicKeyFile, secret and out  parameters must be specified")
 			return 1
 		}
 
 		ep, err := os.ReadFile(*tpmPublicKeyFile)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, " error reading tpmPublicKeyFile : %v", err)
+			fmt.Fprintf(os.Stderr, " error reading tpmPublicKeyFile : %v", err)
 			return 1
 		}
 
@@ -103,7 +104,7 @@ func run() int {
 		block, _ := pem.Decode(ep)
 		parsedKey, err := x509.ParsePKIXPublicKey(block.Bytes)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "  error parsing encrypting public key : %v", err)
+			fmt.Fprintf(os.Stderr, "  error parsing encrypting public key : %v", err)
 			return 1
 		}
 
@@ -113,7 +114,7 @@ func run() int {
 		case *rsa.PublicKey:
 			rsaPub, ok := parsedKey.(*rsa.PublicKey)
 			if !ok {
-				fmt.Fprintf(os.Stdout, "  error converting encryptingPublicKey to rsa")
+				fmt.Fprintf(os.Stderr, "  error converting encryptingPublicKey to rsa")
 				return 1
 			}
 			ekPububFromPEMTemplate = tpm2.RSAEKTemplate
@@ -127,7 +128,7 @@ func run() int {
 		case *ecdsa.PublicKey:
 			ecPub, ok := parsedKey.(*ecdsa.PublicKey)
 			if !ok {
-				fmt.Fprintf(os.Stdout, "  error converting encryptingPublicKey to ecdsa")
+				fmt.Fprintf(os.Stderr, "  error converting encryptingPublicKey to ecdsa")
 				return 1
 			}
 
@@ -150,19 +151,19 @@ func run() int {
 				},
 			)
 		default:
-			fmt.Fprintf(os.Stdout, "unsupported public key type %v", pub)
+			fmt.Fprintf(os.Stderr, "unsupported public key type %v", pub)
 			return 1
 		}
 
 		// now read in the secret
 		f, err := os.ReadFile(*secret)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, " error reading secret : %v", err)
+			fmt.Fprintf(os.Stderr, " error reading secret : %v", err)
 			return 1
 		}
 
 		if *pcrValues != "" && *password != "" {
-			fmt.Fprintf(os.Stdout, "either pcrValues or password must be specified; not both")
+			fmt.Fprintf(os.Stderr, "either pcrValues or password must be specified; not both")
 			return 1
 		}
 
@@ -172,12 +173,12 @@ func run() int {
 			if len(entry) == 2 {
 				uv, err := strconv.ParseUint(entry[0], 10, 32)
 				if err != nil {
-					fmt.Fprintf(os.Stdout, " PCR key:value is invalid in parsing %s", v)
+					fmt.Fprintf(os.Stderr, " PCR key:value is invalid in parsing %s", v)
 					return 1
 				}
 				hexEncodedPCR, err := hex.DecodeString(strings.ToLower(entry[1]))
 				if err != nil {
-					fmt.Fprintf(os.Stdout, " PCR key:value is invalid in encoding %s", v)
+					fmt.Fprintf(os.Stderr, " PCR key:value is invalid in encoding %s", v)
 					return 1
 				}
 				pcrMap[uint(uv)] = hexEncodedPCR
@@ -193,7 +194,7 @@ func run() int {
 		case "sha512":
 			hsh = tpm2.TPMAlgSHA512
 		default:
-			fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashScheme)
+			fmt.Fprintf(os.Stderr, " unknown hash selected %s", *hashScheme)
 			return 1
 		}
 
@@ -205,14 +206,14 @@ func run() int {
 			kblock, _ := pem.Decode(f)
 			parsedKey, err := x509.ParsePKCS8PrivateKey(kblock.Bytes)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "  error parsing private key : %v", err)
+				fmt.Fprintf(os.Stderr, "  error parsing private key : %v", err)
 				return 1
 			}
 
 			kt = duplicatepb.Secret_RSA
 			rsaPriv, ok := parsedKey.(*rsa.PrivateKey)
 			if !ok {
-				fmt.Fprintf(os.Stdout, "error converting local key to rsa")
+				fmt.Fprintf(os.Stderr, "error converting local key to rsa")
 				return 1
 			}
 
@@ -239,7 +240,7 @@ func run() int {
 					),
 				}
 			default:
-				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashScheme)
+				fmt.Fprintf(os.Stderr, " unknown rsa scheme selected %s", *rsaScheme)
 				return 1
 			}
 
@@ -289,14 +290,14 @@ func run() int {
 			kblock, _ := pem.Decode(f)
 			parsedKey, err := x509.ParsePKCS8PrivateKey(kblock.Bytes)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "  error parsing private key : %v", err)
+				fmt.Fprintf(os.Stderr, "  error parsing private key : %v", err)
 				return 1
 			}
 
 			kt = duplicatepb.Secret_ECC
 			eccPriv, ok := parsedKey.(*ecdsa.PrivateKey)
 			if !ok {
-				fmt.Fprintf(os.Stdout, "error converting local key to ecc")
+				fmt.Fprintf(os.Stderr, "error converting local key to ecc")
 				return 1
 			}
 			pk := eccPriv.PublicKey
@@ -352,7 +353,7 @@ func run() int {
 					},
 				)
 			default:
-				fmt.Fprintf(os.Stdout, " unknown hash selected %s", *hashScheme)
+				fmt.Fprintf(os.Stderr, " unknown ecc scheme selected %s", *eccScheme)
 				return 1
 			}
 
@@ -398,10 +399,15 @@ func run() int {
 		case "hmac":
 
 			keySensitive := f
+			hh, err := hsh.Hash()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error converting hash: %v", err)
+				return 1
+			}
 
 			// hmac is bound by the block size (openssl wraps larger keys to fit in)
-			if len(keySensitive) > sha256.BlockSize {
-				fmt.Fprintf(os.Stdout, "error max hmac key size for sha256 is %d bytes", sha256.BlockSize)
+			if len(keySensitive) > hh.New().BlockSize() {
+				fmt.Fprintf(os.Stderr, "error max hmac key size is %d bytes", sha256.BlockSize)
 				return 1
 			}
 
@@ -461,11 +467,11 @@ func run() int {
 		case "aes":
 			keySensitive, err := hex.DecodeString(string(f))
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "  error parsing private key : %v", err)
+				fmt.Fprintf(os.Stderr, "  error parsing private key : %v", err)
 				return 1
 			}
 			if len(keySensitive) > aes.BlockSize {
-				fmt.Fprintf(os.Stdout, "  error ke must be smaller than aes blocksize bytes : %d , got %d ", aes.BlockSize, len(keySensitive))
+				fmt.Fprintf(os.Stderr, "  error ke must be smaller than aes blocksize bytes : %d , got %d ", aes.BlockSize, len(keySensitive))
 				return 1
 			}
 			kt = duplicatepb.Secret_AES
@@ -474,6 +480,19 @@ func run() int {
 			privHash := crypto.SHA256.New()
 			privHash.Write(sv)
 			privHash.Write(keySensitive)
+
+			var sch tpm2.TPMAlgID
+			switch *aesScheme {
+			case "cfb":
+				sch = tpm2.TPMAlgCFB
+			case "ctr":
+				sch = tpm2.TPMAlgCTR
+			case "cbc":
+				sch = tpm2.TPMAlgCBC
+			default:
+				fmt.Fprintf(os.Stderr, " unknown aes scheme selected %s", *aesScheme)
+				return 1
+			}
 
 			dupKeyTemplate = tpm2.TPMTPublic{
 				Type:    tpm2.TPMAlgSymCipher,
@@ -492,7 +511,7 @@ func run() int {
 					&tpm2.TPMSSymCipherParms{
 						Sym: tpm2.TPMTSymDefObject{
 							Algorithm: tpm2.TPMAlgAES,
-							Mode:      tpm2.NewTPMUSymMode(tpm2.TPMAlgAES, tpm2.TPMAlgCFB),
+							Mode:      tpm2.NewTPMUSymMode(tpm2.TPMAlgAES, sch),
 							KeyBits: tpm2.NewTPMUSymKeyBits(
 								tpm2.TPMAlgAES,
 								tpm2.TPMKeyBits(*keySize),
@@ -527,25 +546,25 @@ func run() int {
 			}
 
 		default:
-			fmt.Fprintf(os.Stdout, " unknown --keyType please specify rsa|ecc|aes|hmac\n")
+			fmt.Fprintf(os.Stderr, " unknown --keyType please specify rsa|ecc|aes|hmac\n")
 			return 1
 		}
 
 		wrappb, err := tpmcopy.Duplicate(ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, pcrMap)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "error duplicating %v", err)
+			fmt.Fprintf(os.Stderr, "error duplicating %v", err)
 			return 1
 		}
 
 		b, err := protojson.Marshal(&wrappb)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "failed to wrap proto Key: %v", err)
+			fmt.Fprintf(os.Stderr, "failed to wrap proto Key: %v", err)
 			return 1
 		}
 
 		err = os.WriteFile(*out, b, 0666)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error writing encrypted blob %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error writing encrypted blob %v\n", err)
 			return 1
 		}
 		fmt.Printf("Duplicate Key written to: %s\n", *out)
@@ -553,12 +572,12 @@ func run() int {
 	}
 
 	if *mode != "import" && *mode != "publickey" && *mode != "evict" {
-		fmt.Fprintf(os.Stdout, "--mode must be either import, publickey, evict or duplicate, got  %s", *mode)
+		fmt.Fprintf(os.Stderr, "--mode must be either import, publickey, evict or duplicate, got  %s", *mode)
 		return 1
 	}
 	rwc, err := tpmcopy.OpenTPM(*tpmPath)
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "can't open TPM : %v", err)
+		fmt.Fprintf(os.Stderr, "can't open TPM : %v", err)
 		return 1
 	}
 	defer func() {
@@ -576,7 +595,7 @@ func run() int {
 		InPublic: tpm2.New2B(tpm2.RSAEKTemplate),
 	}.Execute(rwr)
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "error creating EK Primary  %v", err)
+		fmt.Fprintf(os.Stderr, "error creating EK Primary  %v", err)
 		return 1
 	}
 	defer func() {
@@ -587,7 +606,7 @@ func run() int {
 
 	if *sessionEncryptionName != "" {
 		if *sessionEncryptionName != hex.EncodeToString(sessionEncryptionRsp.Name.Buffer) {
-			fmt.Fprintf(os.Stdout, " session encryption names do not match expected [%s] got [%s]", *sessionEncryptionName, hex.EncodeToString(sessionEncryptionRsp.Name.Buffer))
+			fmt.Fprintf(os.Stderr, " session encryption names do not match expected [%s] got [%s]", *sessionEncryptionName, hex.EncodeToString(sessionEncryptionRsp.Name.Buffer))
 			return 1
 		}
 	}
@@ -596,7 +615,7 @@ func run() int {
 	case "publickey":
 
 		if *tpmPublicKeyFile == "" {
-			fmt.Fprintf(os.Stdout, "tpmPublicKeyFile must be specified")
+			fmt.Fprintf(os.Stderr, "tpmPublicKeyFile must be specified")
 			return 1
 		}
 
@@ -614,7 +633,7 @@ func run() int {
 			t = keyfile.ECCSRK_H2_Template
 			primaryHandle = tpm2.TPMRHOwner
 		default:
-			fmt.Fprintf(os.Stdout, "unsupported --keyType must be either rsa or ecc, got %v\n", *keyType)
+			fmt.Fprintf(os.Stderr, "unsupported --keyType must be either rsa or ecc, got %v\n", *keyType)
 			return 1
 		}
 
@@ -627,7 +646,7 @@ func run() int {
 			InPublic: tpm2.New2B(t),
 		}.Execute(rwr)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "can't create object TPM: %v", err)
+			fmt.Fprintf(os.Stderr, "can't create object TPM: %v", err)
 			return 1
 		}
 
@@ -637,7 +656,7 @@ func run() int {
 			}
 			_, err := flushContextCmd.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "can't close TPM %v", err)
+				fmt.Fprintf(os.Stderr, "can't close TPM %v", err)
 			}
 		}()
 
@@ -647,13 +666,13 @@ func run() int {
 			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle,
 		}, cCreateEK.ObjectHandle)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "can't getting public key %v", err)
+			fmt.Fprintf(os.Stderr, "can't getting public key %v", err)
 			return 1
 		}
 
 		err = os.WriteFile(*tpmPublicKeyFile, b, 0644)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
 			return 1
 		}
 		fmt.Printf("Public Key written to: %s\n", *tpmPublicKeyFile)
@@ -661,13 +680,13 @@ func run() int {
 	case "import":
 
 		if *in == "" || *out == "" {
-			fmt.Fprintf(os.Stdout, "in and out  parameters must be specified")
+			fmt.Fprintf(os.Stderr, "in and out  parameters must be specified")
 			return 1
 		}
 
 		bt, err := os.ReadFile(*in)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error writing reading blob %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error writing reading blob %v\n", err)
 			return 1
 		}
 
@@ -675,7 +694,7 @@ func run() int {
 
 		err = protojson.Unmarshal(bt, &k)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "failed to unmarshall proto Key: %v", err)
+			fmt.Fprintf(os.Stderr, "failed to unmarshall proto Key: %v", err)
 			return 1
 		}
 
@@ -688,7 +707,7 @@ func run() int {
 		} else if *parentKeyType == tpmcopy.H2 && k.ParentKeyType == duplicatepb.Secret_H2 {
 			t = keyfile.ECCSRK_H2_Template
 		} else {
-			fmt.Fprintf(os.Stdout, "  keytype in file [%s] mismatched with command line: [%s]", k.ParentKeyType, *parentKeyType)
+			fmt.Fprintf(os.Stderr, "  keytype in file [%s] mismatched with command line: [%s]", k.ParentKeyType, *parentKeyType)
 			return 1
 		}
 
@@ -709,7 +728,7 @@ func run() int {
 			InPublic: tpm2.New2B(t),
 		}.Execute(rwr)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "can't create object TPM: %v", err)
+			fmt.Fprintf(os.Stderr, "can't create object TPM: %v", err)
 			return 1
 		}
 
@@ -719,7 +738,7 @@ func run() int {
 			}
 			_, err := flushContextCmd.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
+				fmt.Fprintf(os.Stderr, "can't closing ek %v", err)
 			}
 		}()
 
@@ -730,7 +749,7 @@ func run() int {
 			Ownerpw:                 []byte(*ownerpw),
 			SessionEncryptionHandle: sessionEncryptionRsp.ObjectHandle}, parentHandle, k)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "failed to import Key: %v", err)
+			fmt.Fprintf(os.Stderr, "failed to import Key: %v", err)
 			return 1
 		}
 		kfb := new(bytes.Buffer)
@@ -741,13 +760,13 @@ func run() int {
 
 		err = keyfile.Encode(kfb, &tpmKey)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
 			return 1
 		}
 
 		err = os.WriteFile(*out, kfb.Bytes(), 0644)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
 			return 1
 		}
 
@@ -755,7 +774,7 @@ func run() int {
 			f := tpm2.Marshal(tpmKey.Pubkey)
 			err = os.WriteFile(*pubout, f, 0644)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
 				return 1
 			}
 		}
@@ -763,7 +782,7 @@ func run() int {
 			f := tpm2.Marshal(tpmKey.Privkey)
 			err = os.WriteFile(*privout, f, 0644)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "Error writing public key to file %v\n", err)
+				fmt.Fprintf(os.Stderr, "Error writing public key to file %v\n", err)
 				return 1
 			}
 		}
@@ -771,7 +790,7 @@ func run() int {
 		fmt.Printf("Imported Key written to: %s\n", *out)
 	case "evict":
 		if (*persistentHandle) == 0 {
-			fmt.Fprintf(os.Stdout, "Error: persistentHandle= cannot be null if mode=evict\n")
+			fmt.Fprintf(os.Stderr, "Error: persistentHandle= cannot be null if mode=evict\n")
 			return 1
 		}
 
@@ -784,12 +803,12 @@ func run() int {
 
 		c, err := os.ReadFile(*in)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "error reading keyfile %v", err)
+			fmt.Fprintf(os.Stderr, "error reading keyfile %v", err)
 			return 1
 		}
 		key, err := keyfile.Decode(c)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "error decoding keyfile %v", err)
+			fmt.Fprintf(os.Stderr, "error decoding keyfile %v", err)
 			return 1
 		}
 
@@ -808,7 +827,7 @@ func run() int {
 				InPublic: tpm2.New2B(keyfile.ECCSRK_H2_Template),
 			}.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "failed loading key with parent: %v", err)
+				fmt.Fprintf(os.Stderr, "failed loading key with parent: %v", err)
 				return 1
 			}
 			defer func() {
@@ -827,7 +846,7 @@ func run() int {
 				InPrivate: key.Privkey,
 			}.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "error loading key %v", err)
+				fmt.Fprintf(os.Stderr, "error loading key %v", err)
 				return 1
 			}
 
@@ -847,7 +866,7 @@ func run() int {
 			case tpmcopy.ECC_EK:
 				t = tpm2.ECCEKTemplate
 			default:
-				fmt.Fprintf(os.Stdout, "  unsupported parent key type %s", *parentKeyType)
+				fmt.Fprintf(os.Stderr, "  unsupported parent key type %s", *parentKeyType)
 				return 1
 			}
 
@@ -862,7 +881,7 @@ func run() int {
 				InPublic: tpm2.New2B(t),
 			}.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "can't create primaryObject: %v", err)
+				fmt.Fprintf(os.Stderr, "can't create primaryObject: %v", err)
 				return 1
 			}
 
@@ -872,13 +891,13 @@ func run() int {
 				}
 				_, err := flushContextCmd.Execute(rwr)
 				if err != nil {
-					fmt.Fprintf(os.Stdout, "can't closing ek %v", err)
+					fmt.Fprintf(os.Stderr, "can't closing ek %v", err)
 				}
 			}()
 
 			load_session, load_session_cleanup, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "setting up trial session: %v", err)
+				fmt.Fprintf(os.Stderr, "setting up trial session: %v", err)
 				return 1
 			}
 			defer load_session_cleanup()
@@ -893,7 +912,7 @@ func run() int {
 				NonceTPM:      load_session.NonceTPM(),
 			}.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "error setting policy PolicyDuplicationSelect %v", err)
+				fmt.Fprintf(os.Stderr, "error setting policy PolicyDuplicationSelect %v", err)
 				return 1
 			}
 
@@ -907,7 +926,7 @@ func run() int {
 				InPrivate: key.Privkey,
 			}.Execute(rwr)
 			if err != nil {
-				fmt.Fprintf(os.Stdout, "error loading key %v", err)
+				fmt.Fprintf(os.Stderr, "error loading key %v", err)
 				return 1
 			}
 
@@ -928,7 +947,7 @@ func run() int {
 			PersistentHandle: tpm2.TPMHandle(*persistentHandle),
 		}.Execute(rwr)
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "Error creating persistentHandle %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error creating persistentHandle %v\n", err)
 			return 1
 		}
 
