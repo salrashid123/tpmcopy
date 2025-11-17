@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	TPMB = "127.0.0.1:2341"
+	TPMB = "127.0.0.1:2321"
 )
 
 func TestMain(t *testing.T) {
