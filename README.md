@@ -585,7 +585,7 @@ tpmcopy --mode evict \
 go run rsa/persistent_key/main.go --persistentHandle=0x81008001 --password=bar  --tpm-path=$TPMB
 ```
 
-#### Use as Library
+### Use as Library
 
 You can also use this utility in go directly.  For an example of using as a library, see the testcases or the `example/direct` folder which creates a public key, then duplicates an HMAC key and finally import it into a destination TPM
 
