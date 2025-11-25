@@ -7,8 +7,7 @@ require (
 	github.com/google/go-tpm v0.9.5
 	github.com/salrashid123/signer v0.9.3
 	github.com/salrashid123/tpm2genkey v0.8.0
-	github.com/salrashid123/tpmcopy v0.0.45
-// github.com/salrashid123/tpmcopy v0.0.0
+	github.com/salrashid123/tpmcopy v0.0.0
 )
 
 require (
@@ -17,4 +16,4 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 )
 
-// replace github.com/salrashid123/tpmcopy => ../
+replace github.com/salrashid123/tpmcopy => ../

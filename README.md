@@ -585,6 +585,71 @@ tpmcopy --mode evict \
 go run rsa/persistent_key/main.go --persistentHandle=0x81008001 --password=bar  --tpm-path=$TPMB
 ```
 
+#### Use as Library
+
+You can also use this utility in go directly.  For an example of using as a library, see the testcases or the `example/direct` folder which creates a public key, then duplicates an HMAC key and finally import it into a destination TPM
+
+
+By default the example uses a software TPM:
+
+```bash
+### get public key
+
+$ go run direct/public/main.go -tpmPublicKeyFile /tmp/public.pem -tpm-path "127.0.0.1:2321"
+
+$ cat /tmp/public.pem 
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAne5iFdkj4QETbjUnWcOl
++wQl6s9tBR2bSOp3gRUCn1noG7E62U5T3jCP9k0883rWeUh6fTICTzxhoPRIlm/R
+z0vFnKOm51VYAgT/XwhirLTqaskvS76B9OXGRt+9BVo0RkbzV8fhYzd2kGQPGdj5
+ncRSqF/wzLEnfdv5tZziPmdtHQXvlGdVOEIP3Zz2VPi36DP3IW5wnxohrTIB9R/o
+m+1jdG2CRn7rkv2ZRvBKP9umNttG3wFM4qn2Pn+mBZ9rfxPCeZULC/EMu2lvG/+q
+lBSUzXVDECes2SdamtwvA2o0Wnfw4SunIY2ehT+J8jq7c/4mMHus8amCBs1tgcDA
+bwIDAQAB
+-----END PUBLIC KEY-----
+
+
+echo -n "change this password to a secret" > /tmp/hmac_256.key
+
+
+### duplicate
+
+$ go run direct/duplicate/main.go  -parentKeyType rsa_ek \
+    -secret /tmp/hmac_256.key -tpmPublicKeyFile /tmp/public.pem 
+
+
+$ cat /tmp/out.json | jq '.'
+{
+  "version": 1,
+  "type": "HMAC",
+  "parentKeyType": "EndorsementRSA",
+  "key": "-----BEGIN TSS2 PRIVATE KEY-----\nMIIB4QYGZ4EFCgEEoAMBAf+iggEGBIIBAgEAlXOL+W9RnYQFb3zoatVISsgZnMJS\nwBKtSKwHMh9vBCvIGl69puX9Od4JGBZyi4uUf48Cjci+CRBEKX3ijjC5RWVnPpLt\nCndMK3jNxoGQK3hoIzDvfHitVzEHcOa151Wg8WKq2uAOJoDVSEgPf7OqPYWnCiQE\nbMdogZhZWPM6BYbUOF0dsC96kEd1Bj6AXUNKa5sD8AgPWJAPhujQyaiuhybCwAjN\nzVOi04VA5bGcPr4DOpsQ7dWFPcRYtpkQQ7tMllJaMDouAeibVOE2zDd30aklolsc\nb5/hroxpSTQk317DakuqmAAinb6+QGcStNqhUl1i2xL9kJQpEulM7HBMoQIEQAAB\nQARSAFAACAALAAQAAAAgOY9wqZE2tqP3VTLztEEjQI8CmVJpp/aP2wFpaT1zA2AA\nBQALACAL1ozkZPJRncVrwrLS3XqEQsHUR4Nw/ujnWE0HbfPrrwRuAGwAIDlUgijx\nH4z+Kh1XWChiuswtgZkpdGZPbdAAVy2g7bsiokFY/CDMyzawCGyR6THxsn6FH/Aj\nXiGwMuOm/jJsnC2vEwAb6pZ8bU/M+4lhQteR4ZfaCMlZvKS7Ka0tMyurlPjvG9CH\nV8yP6/E=\n-----END TSS2 PRIVATE KEY-----\n",
+  "parentName": "000b8b6e4856595f2a27e663f7b727cfd9ae6f4ab085d8548f785b7ae8f11a107c06"
+}
+
+
+### import
+$ go run direct/import/main.go  -in /tmp/out.json \
+   -out /tmp/key.pem -tpm-path "127.0.0.1:2321"
+
+
+$ cat /tmp/key.pem 
+-----BEGIN TSS2 PRIVATE KEY-----
+MIIBCwYGZ4EFCgEDoAMBAf8CBQCAAAABBFIAUAAIAAsABAAAACA5j3CpkTa2o/dV
+MvO0QSNAjwKZUmmn9o/bAWlpPXMDYAAFAAsAIE1UrKKNAGtyjMUXvFb4/xdC8CaE
+/tlocqTCOiSjORZ6BIGgAJ4AIIH39gnyjK0B/SM8WzscKpgzvWXD92h+wBoM7ha1
+YrWVABChCu4bQTtNOSPmYD4uX3CjNFc5BCr2vgRngTUdz74dCY3CZNCvRU9/VYAq
+++q8lVZP1nHBZxK0m2vllJJHO56HnFUCcJ5hZKCaNbyUbWZ4LJi/9WoaaRtFONIE
+5APNOKtWvcb/s9rqXkfStVNTXF56/AE0/HoFegzHbA==
+-----END TSS2 PRIVATE KEY-----
+
+
+### use the key to run hmac
+$ go run hmac/password/main.go --pemFile=/tmp/key.pem -tpm-path "127.0.0.1:2321"
+
+2025/11/24 22:27:38 Hmac: 7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2
+```
+
 ### Openssl compatiblity
 
 Note that while openssl does have a tpm2 provider, the default CLI does not support complex policy statements bound to keys.
