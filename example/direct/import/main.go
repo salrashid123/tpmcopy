@@ -31,11 +31,7 @@ var (
 	privout       = flag.String("privout", "/tmp/priv.bin", "(optional) File to write the tpm2_tools compatible private part")
 	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
 
-	hashScheme = flag.String("hashScheme", "sha256", "sha256|sha384|sha512 (default sha256)")
-	keyName    = flag.String("keyName", "", "User defined description of the key to export")
-
 	password               = flag.String("password", "", "Password for the created key")
-	persistentHandle       = flag.Uint("persistentHandle", 0x81008001, "persistentHandle to save the key to (default 0x81008001 persistent)")
 	parentpersistentHandle = flag.Uint("parentpersistentHandle", 0, "persistentHandle to save the key to (default 0 persistent)")
 )
 

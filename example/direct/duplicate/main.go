@@ -11,14 +11,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
-	"net"
 	"os"
-	"slices"
 
 	keyfile "github.com/foxboron/go-tpm-keyfiles"
 	"github.com/google/go-tpm/tpm2"
-	"github.com/google/go-tpm/tpmutil"
 	"github.com/salrashid123/tpmcopy"
 	duplicatepb "github.com/salrashid123/tpmcopy/duplicatepb"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -27,9 +23,7 @@ import (
 const ()
 
 var (
-	tpmPath          = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
 	tpmPublicKeyFile = flag.String("tpmPublicKeyFile", "/tmp/public.pem", "ParentKey in PEM format")
-	ownerpw          = flag.String("ownerpw", "", "Owner Password for the created key")
 	parentKeyType    = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
 	secret           = flag.String("secret", "/tmp/hmac_256.key", "File with secret to duplicate (rsa | ecc | hex encoded symmetric key or hmac pass)")
 	out              = flag.String("out", "/tmp/out.json", "File to write the duplicate to")
@@ -40,16 +34,6 @@ var (
 	password = flag.String("password", "", "Password for the created key")
 )
 
-var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
-
-func OpenTPM(path string) (io.ReadWriteCloser, error) {
-	if slices.Contains(TPMDEVICES, path) {
-		return tpmutil.OpenTPM(path)
-	} else {
-		return net.Dial("tcp", path)
-	}
-}
-
 func main() {
 	os.Exit(run()) // since defer func() needs to get called first
 }
@@ -57,16 +41,6 @@ func main() {
 func run() int {
 
 	flag.Parse()
-
-	rwc, err := OpenTPM(*tpmPath)
-	if err != nil {
-		log.Fatalf("can't open TPM %q: %v", *tpmPath, err)
-	}
-	defer func() {
-		if err := rwc.Close(); err != nil {
-			log.Fatalf("can't close TPM %q: %v", *tpmPath, err)
-		}
-	}()
 
 	if *tpmPublicKeyFile == "" || *secret == "" || *out == "" {
 		fmt.Fprintf(os.Stderr, "tpmPublicKeyFile, secret and out  parameters must be specified")
