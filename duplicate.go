@@ -122,7 +122,7 @@ func GetPublicKey(h *TPMConfig, handle tpm2.TPMHandle) ([]byte, error) {
 }
 
 // create a duplicate of the given key type and template
-func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, parentKeyType duplicatepb.Secret_ParentKeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte) (duplicatepb.Secret, error) {
+func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secret_KeyType, parentKeyType duplicatepb.Secret_ParentKeyType, keyName string, dupTemplate tpm2.TPMTPublic, dupSensitive tpm2.TPMTSensitive, pcrMap map[uint][]byte, skipPolicy bool) (duplicatepb.Secret, error) {
 
 	var ap []*keyfile.TPMPolicy
 	var ekrsaPub *rsa.PublicKey
@@ -189,165 +189,165 @@ func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secre
 	var pcv []*duplicatepb.PCRS
 	var finalPolicyDigest []byte
 
-	if len(pcrMap) > 0 {
+	if !skipPolicy {
+		if len(pcrMap) > 0 {
 
-		_, pcrs, pcrHash, err := getPCRMap(tpm2.TPMAlgSHA256, pcrMap)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error reading pcrMap %v", err)
-		}
-		sel := tpm2.TPMLPCRSelection{
-			PCRSelections: []tpm2.TPMSPCRSelection{
-				{
-					Hash:      tpm2.TPMAlgSHA256,
-					PCRSelect: tpm2.PCClientCompatible.PCRs(pcrs...),
+			_, pcrs, pcrHash, err := getPCRMap(tpm2.TPMAlgSHA256, pcrMap)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error reading pcrMap %v", err)
+			}
+			sel := tpm2.TPMLPCRSelection{
+				PCRSelections: []tpm2.TPMSPCRSelection{
+					{
+						Hash:      tpm2.TPMAlgSHA256,
+						PCRSelect: tpm2.PCClientCompatible.PCRs(pcrs...),
+					},
 				},
-			},
-		}
+			}
 
-		papcr := tpm2.PolicyPCR{
-			PcrDigest: tpm2.TPM2BDigest{
-				Buffer: pcrHash,
-			},
-			Pcrs: tpm2.TPMLPCRSelection{
-				PCRSelections: sel.PCRSelections,
-			},
-		}
+			papcr := tpm2.PolicyPCR{
+				PcrDigest: tpm2.TPM2BDigest{
+					Buffer: pcrHash,
+				},
+				Pcrs: tpm2.TPMLPCRSelection{
+					PCRSelections: sel.PCRSelections,
+				},
+			}
 
-		pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for PolicyAuthValue : %v", err)
-		}
-		err = papcr.Update(pol)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for PolicyAuthValue %v", err)
-		}
-		e, err := genkeyutil.CPBytes(papcr)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyAuthValue: %v", err)
-		}
+			pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for PolicyAuthValue : %v", err)
+			}
+			err = papcr.Update(pol)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for PolicyAuthValue %v", err)
+			}
+			e, err := genkeyutil.CPBytes(papcr)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyAuthValue: %v", err)
+			}
 
-		ap = append(ap, &keyfile.TPMPolicy{
-			CommandCode:   int(tpm2.TPMCCPolicyPCR),
-			CommandPolicy: e,
-		})
+			ap = append(ap, &keyfile.TPMPolicy{
+				CommandCode:   int(tpm2.TPMCCPolicyPCR),
+				CommandPolicy: e,
+			})
 
-		pds := tpm2.PolicyDuplicationSelect{
-			NewParentName: *ekName,
-		}
+			pds := tpm2.PolicyDuplicationSelect{
+				NewParentName: *ekName,
+			}
 
-		polds, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyDuplicateSelect: %v", err)
-		}
-		err = pds.Update(polds)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyDuplicateSelect: %v", err)
-		}
-		de, err := genkeyutil.CPBytes(pds)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyDuplicationSelect: %v", err)
-		}
+			polds, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyDuplicateSelect: %v", err)
+			}
+			err = pds.Update(polds)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyDuplicateSelect: %v", err)
+			}
+			de, err := genkeyutil.CPBytes(pds)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyDuplicationSelect: %v", err)
+			}
 
-		ap = append(ap, &keyfile.TPMPolicy{
-			CommandCode:   int(tpm2.TPMCCPolicyDuplicationSelect),
-			CommandPolicy: de,
-		})
+			ap = append(ap, &keyfile.TPMPolicy{
+				CommandCode:   int(tpm2.TPMCCPolicyDuplicationSelect),
+				CommandPolicy: de,
+			})
 
-		por := tpm2.PolicyOr{
-			PHashList: tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{tpm2.TPM2BDigest{Buffer: pol.Hash().Digest}, tpm2.TPM2BDigest{Buffer: polds.Hash().Digest}}},
+			por := tpm2.PolicyOr{
+				PHashList: tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{tpm2.TPM2BDigest{Buffer: pol.Hash().Digest}, tpm2.TPM2BDigest{Buffer: polds.Hash().Digest}}},
+			}
+
+			polOR, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyOR: %v", err)
+			}
+			err = por.Update(polOR)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyOR: %v", err)
+			}
+
+			porA, err := genkeyutil.CPBytes(por)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyOr: %v", err)
+			}
+
+			ap = append(ap, &keyfile.TPMPolicy{
+				CommandCode:   int(tpm2.TPMCCPolicyOR),
+				CommandPolicy: porA,
+			})
+
+			finalPolicyDigest = polOR.Hash().Digest
+
+		} else {
+			paa := tpm2.PolicyAuthValue{}
+
+			pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for PolicyAuthValue : %v", err)
+			}
+			err = paa.Update(pol)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for PolicyAuthValue %v", err)
+			}
+			e, err := genkeyutil.CPBytes(paa)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyAuthValue: %v", err)
+			}
+
+			ap = append(ap, &keyfile.TPMPolicy{
+				CommandCode:   int(tpm2.TPMCCPolicyAuthValue),
+				CommandPolicy: e,
+			})
+
+			pds := tpm2.PolicyDuplicationSelect{
+				NewParentName: *ekName,
+			}
+
+			polds, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyDuplicateSelect: %v", err)
+			}
+			err = pds.Update(polds)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyDuplicateSelect: %v", err)
+			}
+			de, err := genkeyutil.CPBytes(pds)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyDuplicationSelect: %v", err)
+			}
+
+			ap = append(ap, &keyfile.TPMPolicy{
+				CommandCode:   int(tpm2.TPMCCPolicyDuplicationSelect),
+				CommandPolicy: de,
+			})
+
+			por := tpm2.PolicyOr{
+				PHashList: tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{tpm2.TPM2BDigest{Buffer: pol.Hash().Digest}, tpm2.TPM2BDigest{Buffer: polds.Hash().Digest}}},
+			}
+
+			polOR, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyOR: %v", err)
+			}
+			err = por.Update(polOR)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyOR: %v", err)
+			}
+
+			porA, err := genkeyutil.CPBytes(por)
+			if err != nil {
+				return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyOr: %v", err)
+			}
+
+			ap = append(ap, &keyfile.TPMPolicy{
+				CommandCode:   int(tpm2.TPMCCPolicyOR),
+				CommandPolicy: porA,
+			})
+
+			finalPolicyDigest = polOR.Hash().Digest
 		}
-
-		polOR, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyOR: %v", err)
-		}
-		err = por.Update(polOR)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyOR: %v", err)
-		}
-
-		porA, err := genkeyutil.CPBytes(por)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyOr: %v", err)
-		}
-
-		ap = append(ap, &keyfile.TPMPolicy{
-			CommandCode:   int(tpm2.TPMCCPolicyOR),
-			CommandPolicy: porA,
-		})
-
-		finalPolicyDigest = polOR.Hash().Digest
-
-	} else {
-		paa := tpm2.PolicyAuthValue{}
-
-		pol, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for PolicyAuthValue : %v", err)
-		}
-		err = paa.Update(pol)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for PolicyAuthValue %v", err)
-		}
-		e, err := genkeyutil.CPBytes(paa)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyAuthValue: %v", err)
-		}
-
-		ap = append(ap, &keyfile.TPMPolicy{
-			CommandCode:   int(tpm2.TPMCCPolicyAuthValue),
-			CommandPolicy: e,
-		})
-
-		pds := tpm2.PolicyDuplicationSelect{
-			NewParentName: *ekName,
-		}
-
-		polds, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyDuplicateSelect: %v", err)
-		}
-		err = pds.Update(polds)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyDuplicateSelect: %v", err)
-		}
-		de, err := genkeyutil.CPBytes(pds)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyDuplicationSelect: %v", err)
-		}
-
-		ap = append(ap, &keyfile.TPMPolicy{
-			CommandCode:   int(tpm2.TPMCCPolicyDuplicationSelect),
-			CommandPolicy: de,
-		})
-
-		por := tpm2.PolicyOr{
-			PHashList: tpm2.TPMLDigest{Digests: []tpm2.TPM2BDigest{tpm2.TPM2BDigest{Buffer: pol.Hash().Digest}, tpm2.TPM2BDigest{Buffer: polds.Hash().Digest}}},
-		}
-
-		polOR, err := tpm2.NewPolicyCalculator(tpm2.TPMAlgSHA256)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error setting up NewPolicyCalculator for policyOR: %v", err)
-		}
-		err = por.Update(polOR)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error updating NewPolicyCalculator for policyOR: %v", err)
-		}
-
-		porA, err := genkeyutil.CPBytes(por)
-		if err != nil {
-			return duplicatepb.Secret{}, fmt.Errorf("error creating cpbytes PolicyOr: %v", err)
-		}
-
-		ap = append(ap, &keyfile.TPMPolicy{
-			CommandCode:   int(tpm2.TPMCCPolicyOR),
-			CommandPolicy: porA,
-		})
-
-		finalPolicyDigest = polOR.Hash().Digest
 	}
-
-	// createImportBlobHelper
 
 	dupTemplate.AuthPolicy = tpm2.TPM2BDigest{
 		Buffer: finalPolicyDigest,

@@ -195,7 +195,7 @@ func run() int {
 			Buffer: []byte(*password), // set any userAuth
 		}
 	}
-	wrappb, err := tpmcopy.Duplicate(ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, make(map[uint][]byte))
+	wrappb, err := tpmcopy.Duplicate(ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, make(map[uint][]byte), false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error duplicating %v", err)
 		return 1

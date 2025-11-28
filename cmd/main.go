@@ -32,7 +32,8 @@ const ()
 var (
 	help = flag.Bool("help", false, "print usage")
 
-	mode = flag.String("mode", "", "publickey | duplicate | import | evict")
+	mode       = flag.String("mode", "", "publickey | duplicate | import | evict")
+	skipPolicy = flag.Bool("skipPolicy", false, "Skip binding the duplicated key to any policy")
 
 	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
 
@@ -252,7 +253,7 @@ func run() int {
 					FixedTPM:            false,
 					FixedParent:         false,
 					SensitiveDataOrigin: false,
-					UserWithAuth:        false,
+					UserWithAuth:        *skipPolicy,
 				},
 
 				Parameters: tpm2.NewTPMUPublicParms(
@@ -364,7 +365,7 @@ func run() int {
 					FixedTPM:            false,
 					FixedParent:         false,
 					SensitiveDataOrigin: false,
-					UserWithAuth:        false,
+					UserWithAuth:        *skipPolicy,
 					SignEncrypt:         true,
 				},
 				AuthPolicy: tpm2.TPM2BDigest{},
@@ -425,7 +426,7 @@ func run() int {
 					FixedTPM:            false,
 					FixedParent:         false,
 					SensitiveDataOrigin: false,
-					UserWithAuth:        false,
+					UserWithAuth:        *skipPolicy,
 					SignEncrypt:         true,
 				},
 				AuthPolicy: tpm2.TPM2BDigest{},
@@ -501,7 +502,7 @@ func run() int {
 					FixedTPM:            false,
 					FixedParent:         false,
 					SensitiveDataOrigin: false,
-					UserWithAuth:        false,
+					UserWithAuth:        *skipPolicy,
 					SignEncrypt:         true,
 					Decrypt:             true,
 				},
@@ -550,7 +551,7 @@ func run() int {
 			return 1
 		}
 
-		wrappb, err := tpmcopy.Duplicate(ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, pcrMap)
+		wrappb, err := tpmcopy.Duplicate(ekPububFromPEMTemplate, kt, pkt, *keyName, dupKeyTemplate, sens2B, pcrMap, *skipPolicy)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error duplicating %v", err)
 			return 1

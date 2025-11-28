@@ -44,6 +44,8 @@ These policies ensure the key cannot get duplicated beyond the target TPM. Speci
 
 For more details, see the section below on [Bound Key Policy](#bound-key-policy)
 
+You can skip binding to the policies using the `--skipPolicy` flag
+
 Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Primary from Storage.  No other parent types are currently supported.  A TODO: maybe to supply the `name` of any parent directly to the local system vs deriving it from the public key for known types.
 
 ---
@@ -87,6 +89,7 @@ Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Pr
 | **`-pcrValues`** | comma separated list of current pcr values to bind the key to (default: "") |
 | **`-persistentHandle`** | persistentHandle to save the key to (default `0x81008001` owner) |
 | **`-password`** | passphrase for the TPM key (default: "") |
+| **`-skipPolicy`** | skip binding the key to any policy |
 | **`-ownerpw`** | passphrase for the TPM owner (default: "") |
 | **`-tpm-session-encrypt-with-name`** | "hex encoded TPM object 'name' to use with an encrypted session" |
 
@@ -126,7 +129,7 @@ To transfer an RSASSA key
 openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -pkeyopt rsa_keygen_pubexp:65537 -out /tmp/key_rsa.pem
 
 ### TPM-B
-export TPMB="/dev/tpmrm0"
+export TPMB="/dev/tpmrm0"  # TPMB="127.0.0.1:2321"
 tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
 
 ###  copy public.pem to Local
@@ -294,6 +297,34 @@ YrWVABChCu4bQTtNOSPmYD4uX3CjNFc5BCr2vgRngTUdz74dCY3CZNCvRU9/VYAq
 $ go run hmac/password/main.go --pemFile=/tmp/key.pem -tpm-path "127.0.0.1:2321"
 
 2025/11/24 22:27:38 Hmac: 7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2
+```
+
+### SkipPolicy
+
+To transfer an key which is **NOT** bound by a policy, set `--skipPolicy` parameter on duplicate
+
+```bash
+### Local
+openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -pkeyopt rsa_keygen_pubexp:65537 -out /tmp/key_rsa.pem
+
+### TPM-B
+export TPMB="/dev/tpmrm0"  # TPMB="127.0.0.1:2321"
+tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+
+###  copy public.pem to Local
+
+### local
+tpmcopy --mode duplicate --keyType=rsa --secret=/tmp/key_rsa.pem --rsaScheme=rsassa --skipPolicy \
+ --hashScheme=sha256 -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
+
+###  copy /tmp/out.json to TPM-B
+
+### TPM-B
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
+
+### test
+cd example/
+go run rsa/skipPolicy/main.go --pemFile=/tmp/tpmkey.pem  --tpm-path=$TPMB
 ```
 
 ### Bound Key Policy
@@ -656,24 +687,46 @@ Note that while openssl does have a tpm2 provider, the default CLI does not supp
 
 For example, with openssl is limited to basic auth constructors as described [here]](https://github.com/tpm2-software/tpm2-openssl/blob/master/docs/keys.md) 
 
-Since keys transferred by this utility uses more complex policies, you can't really use openssl (but you can use `tpm2_tools`)
+Since default keys transferred by this utility uses more complex policies, you can't easily really use openssl (but you can use `tpm2_tools`).
+
+If you did not use the default policies by setting the `--skipPolicy` and the `h2` template, then some basic openssl operations are possible
 
 ```bash
 export TPM2TOOLS_TCTI="swtpm:port=2321"
 export TPM2OPENSSL_TCTI="swtpm:port=2321"
 
+openssl list --providers -provider tpm2
+   Providers:
+   tpm2
+      name: TPM 2.0 Provider
+      version: 1.3.0
+      status: active
+
+tpmcopy --mode publickey --parentKeyType=h2 \
+   -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+
+tpmcopy --mode duplicate --parentKeyType=h2 --secret=/tmp/key_rsa.pem --skipPolicy \
+   --keyType=rsa -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json 
+
+tpmcopy --mode import --parentKeyType=h2  \
+   --in=/tmp/out.json --out=/tmp/tpmkey.pem --pubout=/tmp/pub.dat --privout=/tmp/priv.dat \
+    --tpm-path=$TPMB
+
 ### assume tpmkey.pem is an rsa key with password using the H2 primary
 openssl asn1parse -in  /tmp/tpmkey.pem
 
-export PASSWORD=bar
-openssl rsa -provider tpm2 -provider default   -in /tmp/tpmkey.pem -passin env:PASSWORD -text
+openssl rsa -provider tpm2 -provider default   -in /tmp/tpmkey.pem  -text
 
-### this will throw an error since no auth valu is bound to the key
+## test signature
+
+cd example/
+go run rsa/skipPolicy/main.go --pemFile=/tmp/tpmkey.pem  --tpm-path=$TPMB --parentKeyType=h2
+
 echo -n "foo" >/tmp/data.txt
 openssl dgst -sha256 -binary -out /tmp/data.hash /tmp/data.txt
+
 openssl  pkeyutl -provider tpm2 -provider default \
-   -sign -inkey /tmp/tpmkey.pem  -passin env:PASSWORD   -in /tmp/data.hash -out /tmp/signature.sig
-   #  --pkeyopt user-auth:bar
+   -sign -inkey /tmp/tpmkey.pem   -in /tmp/data.hash -out /tmp/signature.sig
 ```
 
 ### Session Encryption
@@ -880,11 +933,11 @@ If you want to test locally with a [software TPM](https://github.com/stefanberge
 - Start `TPM-A`
 
 ```bash
-## TPM B
-rm -rf /tmp/myvtpm2 && mkdir /tmp/myvtpm2
+## TPM A
+rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm
 /usr/share/swtpm/swtpm-create-user-config-files
-swtpm_setup --tpmstate /tmp/myvtpm2 --tpm2 --create-ek-cert
-swtpm socket --tpmstate dir=/tmp/myvtpm2 --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear --log level=2
+swtpm_setup --tpmstate /tmp/myvtpm --tpm2 --create-ek-cert
+swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear --log level=2
 
 ## in new window
 export TPM2TOOLS_TCTI="swtpm:port=2321"
