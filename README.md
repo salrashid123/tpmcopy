@@ -30,10 +30,10 @@ If you want to transfer an external `RSA|ECC|AES|HMAC` key _from_  a `local` sys
    The duplicate step will encrypt the external key such that only `TPM-B` can import it.
    The encrypted key is saved as a file which you will need to copy to `TPM-B`
 
-4. On `TPM-B`  [import](https://github.com/tpm2-software/tpm2-tools/blob/master/man/tpm2_import.1.md) the duplicated key you  copied from `TPM-A`
+4. On `TPM-B`  [import](https://github.com/tpm2-software/tpm2-tools/blob/master/man/tpm2_import.1.md) the duplicated key you  copied from `local`
    The imported key is saved in TPM encoded PEM format for later use
 
-5. On `TPM-B` use the imported key to sign,encrypt,decrypt,hmac
+5. On `TPM-B`, use the imported key to sign,encrypt,decrypt,hmac
 
 
 It is critical to note the key that is transferred carries specific TPM policies which must be fulfilled upon use.  
