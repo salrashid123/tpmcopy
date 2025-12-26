@@ -120,6 +120,33 @@ go build -o tpmcopy cmd/main.go
 
 To tranfer an `RSA` key from `local` to `TPM-B`
 
+You'll first need the endorsement public key or the H2 parent from `TPM-B`.  You can get that either from TPM-B directly using `tpmcopy` or with a utility like `tpm2_tools`:
+
+For the Endorsement Public:
+
+```bash
+tpm2_createek -c primaryB.ctx -G rsa -u ekB.pub -Q
+tpm2_readpublic -c primaryB.ctx -o ekpubB.pem -f PEM -Q
+```
+
+Note, if you have the EKCertificate, you can easily extract the ekPub
+
+```bash
+tpm2_getekcertificate -X -o ECcert.bin
+openssl x509 -in ECcert.bin -inform DER -noout -text
+openssl x509 -pubkey -noout -in ECcert.bin  -inform DER 
+```
+
+If you wanted to use the `H2` Parent instead of the EK, you need to do that on `TPM-B` itself:
+
+```bash
+printf '\x00\x00' > unique.dat
+tpm2_createprimary -C o -G ecc  -g sha256 \
+     -c primary.ctx \
+     -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -u unique.dat
+tpm2_readpublic -c primary.ctx -o h2Public.pem -f PEM -n primary.name 
+```
+
 ### RSA
 
 To transfer an RSASSA key
