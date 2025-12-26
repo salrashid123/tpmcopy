@@ -930,10 +930,10 @@ $ openssl asn1parse -in  /tmp/tpmkey_pcr.pem
 
 If you want to test locally with a [software TPM](https://github.com/stefanberger/swtpm)
 
-- Start `TPM-A`
+- Start `TPM-B`
 
 ```bash
-## TPM A
+## TPMB
 rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm
 /usr/share/swtpm/swtpm-create-user-config-files
 swtpm_setup --tpmstate /tmp/myvtpm --tpm2 --create-ek-cert
@@ -941,7 +941,7 @@ swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctr
 
 ## in new window
 export TPM2TOOLS_TCTI="swtpm:port=2321"
-export TPMA="127.0.0.1:2321"
+export TPMB="127.0.0.1:2321"
 
 $ tpm2_flushcontext -t &&  tpm2_flushcontext -s  &&  tpm2_flushcontext -l
 $ tpm2_pcrread sha256:23
@@ -965,7 +965,7 @@ openssl x509 -in EKCert.bin -inform DER -noout -text
 To run all the examples:
 
 ```bash
-export TPMA="127.0.0.1:2321"
+export TPMB="127.0.0.1:2321"
 export TPM2TOOLS_TCTI="swtpm:port=2321"
 
 ### TPM-B make sure the pcr value is 0xF5A5FD42D16A20302798EF6ED309979B43003D2320D9F0E8EA9831A92759FB4B
@@ -973,16 +973,16 @@ export TPM2TOOLS_TCTI="swtpm:port=2321"
 tpm2_pcrread sha256:23
 
 ### RSA
-tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMA
+tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
 
 # openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -pkeyopt rsa_keygen_pubexp:65537 -out /tmp/key_rsa.pem
 tpmcopy --mode duplicate  --secret=/tmp/key_rsa.pem --keyType=rsa \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
-tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMA
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
 
 cd example/
-go run rsa/password/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMA
+go run rsa/password/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 cd ..
 
 ### pcr
@@ -990,12 +990,12 @@ tpmcopy --mode duplicate --keyType=rsa    --secret=/tmp/key_rsa.pem \
      --pcrValues=23:f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b  \
       -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
-tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMA
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
 
 cd example/
-go run rsa/pcr/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMA
+go run rsa/pcr/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB
 
-go run rsa/signer_pcr/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMA
+go run rsa/signer_pcr/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB
 cd ..
 
 ### ECC
@@ -1003,10 +1003,10 @@ cd ..
 tpmcopy --mode duplicate --keyType=ecc --secret=/tmp/key_ecc.pem \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
-tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMA
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
 
 cd example/
-go run ecc/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMA 
+go run ecc/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMB
 cd ..
 
 ### AES
@@ -1014,10 +1014,10 @@ cd ..
 tpmcopy --mode duplicate --keyType=aes --aesScheme=cfb --keySize=128 --secret=/tmp/aes.key  \
   --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
-tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMA
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 
 cd example/
-go run aes/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMA 
+go run aes/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMB
 cd ..
 
 ### HMAC
@@ -1025,18 +1025,18 @@ cd ..
 tpmcopy --mode duplicate --keyType=hmac --hashScheme=sha256 --secret=/tmp/hmac.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
-tpmcopy --mode import  --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem   --tpm-path=$TPMA
+tpmcopy --mode import  --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem   --tpm-path=$TPMB
 
 cd example/
-go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMA
+go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 cd ..
 
 
 ### Python RSA
-tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMA
+tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
 tpmcopy --mode duplicate  --secret=/tmp/key_rsa.pem --keyType=rsa \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
-tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMA
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem --tpm-path=$TPMB
 
 cd example/python
 virtualenv env
@@ -1096,7 +1096,6 @@ tpm2_flushcontext -t && tpm2_flushcontext -s && tpm2_flushcontext -l
 tpm2_createprimary -C o -g sha256 -G rsa -c primaryA.ctx
 
 tpm2_loadexternal -C o -g sha256 -G ecc:null:aes128cfb  -u ek.pem -c newparent.ctx \
-   --policy=837197674484b3f81a90cc8d46a5d724fd52d76e06520b64f2a1da1b331469aa \
     --attributes="fixedtpm|fixedparent|sensitivedataorigin|adminwithpolicy|restricted|decrypt"
 tpm2_readpublic -c newparent.ctx -o new_parent.pub -n new_parent.name
 
