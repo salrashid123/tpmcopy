@@ -13,6 +13,37 @@ Alternativley, if you just want some secret to get transferred securely only to 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
 
+
+---
+
+* [Overview](#overview)
+* [Options](#options)
+* [References](#references)
+* [Build](#build)
+* [Usage CLI](#usage-cli)
+  - [RSA](#rsa)
+  - [ECC](#ecc)
+  - [AES](#aes)
+  - [HMAC](#hmac)
+* [Usage Library](#usage-library)
+* [Key Policies](#key-policies)
+  - [Skip Policy](#skippolicy)
+  - [Bound Key Policy](#bound-key-policy)
+  - [Password Policy](#password-policy)
+  - [PCR Policy](#pcr-policy)
+* [Key Parent](#key-parent)
+  - [Using EK Parent](#using-ek-parent)
+  - [Using H2 Parent](#using-h2-parent)
+* [TPM2_TOOLS Compatibility](#tpm2_tools-compatibility)
+* [Parent Persistent Handle](#parent-persistent-handle)
+* [Key persistent handle](#key-persistent-handle)
+* [Openssl Compatibility](#openssl-compatiblity)
+* [Session Encryption](#session-encryption)
+* [Key Formats](#key-formats)
+* [TPMPolicy Syntax PEM Encoding](#tpmpolicy-syntax-pem-encoding)
+* [Setup Software TPM](#setup-software-tpm)
+* [tpmcopy using tpm2_tools](#tpmcopy-using-tpm2_tools)
+
 ---
 
 ### Overview
@@ -49,6 +80,8 @@ You can skip binding to the policies using the `--skipPolicy` flag
 Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Primary from Storage.  No other parent types are currently supported.  A TODO: maybe to supply the `name` of any parent directly to the local system vs deriving it from the public key for known types.
 
 ---
+
+### Options
 
 #### Basic Options
 
@@ -97,7 +130,7 @@ Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Pr
 
 ---
 
-##### References
+### References
 
 * [tpm2 key utility](https://github.com/salrashid123/tpm2genkey)
 * [Sign, Verify and decode using Google Cloud vTPM Attestation Key and Certificate](https://github.com/salrashid123/gcp-vtpm-ek-ak)
@@ -116,7 +149,7 @@ You can use the binary in the [Releases](https://github.com/salrashid123/tpmcopy
 go build -o tpmcopy cmd/main.go
 ```
 
-## Usage
+## Usage CLI
 
 To tranfer an `RSA` key from `local` to `TPM-B`
 
@@ -262,7 +295,7 @@ go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path
 
 ---
 
-### Use as Library
+## Usage Library
 
 You can also use this utility in go directly.  For an example of using as a library, see the testcases or the `example/direct` folder which creates a public key, then duplicates an HMAC key and finally import it into a destination TPM
 
@@ -326,6 +359,8 @@ $ go run hmac/password/main.go --pemFile=/tmp/key.pem -tpm-path "127.0.0.1:2321"
 2025/11/24 22:27:38 Hmac: 7c50506d993b4a10e5ae6b33ca951bf2b8c8ac399e0a34026bb0ac469bea3de2
 ```
 
+## Key Policies
+
 ### SkipPolicy
 
 To transfer an key which is **NOT** bound by a policy, set `--skipPolicy` parameter on duplicate
@@ -347,11 +382,21 @@ tpmcopy --mode duplicate --keyType=rsa --secret=/tmp/key_rsa.pem --rsaScheme=rsa
 ###  copy /tmp/out.json to TPM-B
 
 ### TPM-B
-tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
+tpmcopy --mode import --parentKeyType=rsa_ek \
+  --in=/tmp/out.json --out=/tmp/tpmkey.pem \
+  --pubout=/tmp/pub.dat --privout=/tmp/priv.dat  --tpm-path=$TPMB
 
 ### test
 cd example/
 go run rsa/skipPolicy/main.go --pemFile=/tmp/tpmkey.pem  --tpm-path=$TPMB
+
+### with tpm2_tools
+tpm2_createek -c ek.ctx -G rsa -u ek.pub
+tpm2 startauthsession --session session.ctx --policy-session
+tpm2 policysecret --session session.ctx --object-context endorsement
+tpm2_load -C ek.ctx -c key.ctx -u /tmp/pub.dat -r /tmp/priv.dat --auth session:session.ctx
+echo -n "foo" > /tmp/file.txt
+tpm2_sign -c key.ctx -g sha256  -f plain  -o sig.rss  /tmp/file.txt
 ```
 
 ### Bound Key Policy
@@ -485,6 +530,8 @@ go run rsa/pcr/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB
 go run rsa/signer_pcr/main.go --pemFile=/tmp/tpmkey.pem --tpm-path=$TPMB
 ```
 
+## Key Parent
+
 ### Using EK Parent
 
 The examples above all use `RSAEK` parent, if you want to generate and use an EK ECC parent
@@ -524,7 +571,7 @@ go run rsa/persistent_h2_parent/main.go --pemFile=/tmp/tpmkey.pem \
    --password=bar  --tpm-path=$TPMB
 ```
 
-### TPM2_TOOLS compatibility
+## TPM2_TOOLS compatibility
 
 If you wanted to use `tpm2_tools` on the key imported to `TPM-B`, then use the `--pubout=` and `--privout=` parameters when importing.
 
@@ -625,8 +672,7 @@ tpm2_policyor -S sessionA.dat -L policyA_or.dat sha256:policyA_auth.dat,policyA_
 tpm2_sign -c key.ctx -g sha256  -f plain  -p"session:sessionA.dat+bar"  -o sig.rss  /tmp/file.txt
 ```
 
-
-### Parent persistent handle
+## Parent persistent handle
 
 If you want to encode the PEM key with a preset persistent handle parent, then during import specify the `-parentpersistentHandle=` flag:
 
@@ -671,7 +717,7 @@ cd example/
 go run rsa/persistent_parent/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 ```
 
-### Key persistent handle
+## Key persistent handle
 
 If you want to persist the actual key into NV:
 
@@ -707,8 +753,7 @@ tpmcopy --mode evict \
 go run rsa/persistent_key/main.go --persistentHandle=0x81008001 --password=bar  --tpm-path=$TPMB
 ```
 
-
-### Openssl compatiblity
+## Openssl compatiblity
 
 Note that while openssl does have a tpm2 provider, the default CLI does not support complex policy statements bound to keys.
 
@@ -756,7 +801,7 @@ openssl  pkeyutl -provider tpm2 -provider default \
    -sign -inkey /tmp/tpmkey.pem   -in /tmp/data.hash -out /tmp/signature.sig
 ```
 
-### Session Encryption
+## Session Encryption
 
 Each operation uses [encrypted sessions](https://trustedcomputinggroup.org/wp-content/uploads/TCG_CPU_TPM_Bus_Protection_Guidance_Passive_Attack_Mitigation_8May23-3.pdf) by default and interrogates the TPM for the current EK directly.
 
@@ -773,7 +818,7 @@ xxd -p -c 100 /tmp/ekpubBname.bin
    --tpm-session-encrypt-with-name=000b47ab97fdda365cbb86a37548e38468f72e8baccc633cffc42402183679956608
 ```
 
-### Key Formats
+## Key Formats
 
 This utility encodes the key to transfer as protobuf during the `Duplicate()` step
 
@@ -838,7 +883,7 @@ As mentioned, the `Import()` function saves the imported using in two ways:
 
 ---
 
-#### TPMPolicy Syntax PEM Encoding
+## TPMPolicy Syntax PEM Encoding
 
 If you want to encode the policies into the PEM file based on the __draft__ [ASN.1 Specification for TPM 2.0 Key Files](https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-key-policy-specification), then set `ENABLE_POLICY_SYNTAX` environment variable to any value during the duplicate and import steps.
 
@@ -953,7 +998,7 @@ $ openssl asn1parse -in  /tmp/tpmkey_pcr.pem
   307:d=1  hl=3 l= 144 prim: OCTET STRING      [HEX DUMP]:008E002034CC17FD41CE5414923D8C75624E746276809068E34EF06A2DBBC933004A2E900010EEDBD95BE8D7746EF004BC0DA7CE289B3EEC0FCDC969ADD1D3DC4122FC79BF72F02D2DD9DE11171767FF3979ABA236BC8BF27914B682AFDA920802CD10297594E1A5094A9936AE6CAFE16DDCE1170E65F7A819B1310F8378641DCEF141E3592701D3D80CB35FDC16FB12
 ```
 
-### Setup Software TPM
+## Setup Software TPM
 
 If you want to test locally with a [software TPM](https://github.com/stefanberger/swtpm)
 
@@ -1074,7 +1119,7 @@ python3 esapi_keyfile_policy_duplicateselect_password.py
 
 ---
 
-### tpmcopy using tpm2_tools
+## tpmcopy using tpm2_tools
 
 If you want to see how this flow works with pure `tpm2_tools`, see  [PolicyDuplicateSelect and PolicyAuthValue bound PolicyDuplicate](https://gist.github.com/salrashid123/e487848bd5d3538a68c2284e1b24d89d)
 

@@ -355,6 +355,29 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 			rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
 			require.True(t, ok)
 
+			stringToSign := "foo"
+
+			b := []byte(stringToSign)
+
+			hh, err := tc.hsh.Hash()
+			require.NoError(t, err)
+
+			h := hh.New()
+			h.Write(b)
+			digest := h.Sum(nil)
+
+			var expectedSignature []byte
+
+			if tc.alg == "rsassa" {
+				expectedSignature, err = rsa.SignPKCS1v15(rand.Reader, rsaPrivateKey, hh, digest)
+				require.NoError(t, err)
+			} else {
+				expectedSignature, err = rsa.SignPSS(rand.Reader, rsaPrivateKey, hh, digest, &rsa.PSSOptions{
+					SaltLength: rsa.PSSSaltLengthAuto,
+				})
+				require.NoError(t, err)
+			}
+
 			var sch tpm2.TPMTRSAScheme
 			switch tc.alg {
 			case "rsassa":
@@ -514,17 +537,6 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 
 			require.Equal(t, rsaPubBregen, &rsaPrivateKey.PublicKey)
 
-			stringToSign := "foo"
-
-			b := []byte(stringToSign)
-
-			hh, err := tc.hsh.Hash()
-			require.NoError(t, err)
-
-			h := hh.New()
-			h.Write(b)
-			digest := h.Sum(nil)
-
 			svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(tc.password), pubEKB.Name, ekHandle)
 			require.NoError(t, err)
 			or_sess, or_sess_cleanup, err := svc.GetSession()
@@ -570,9 +582,34 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 				},
 			}
 
-			_, err = sign.Execute(rwrB)
+			sr, err := sign.Execute(rwrB)
 			require.NoError(t, err)
 
+			if tc.alg == "rsassa" {
+				s, err := sr.Signature.Signature.RSASSA()
+				require.NoError(t, err)
+
+				err = rsa.VerifyPKCS1v15(&rsaPrivateKey.PublicKey, hh, digest, s.Sig.Buffer)
+				require.NoError(t, err)
+
+				err = rsa.VerifyPKCS1v15(&rsaPrivateKey.PublicKey, hh, digest, expectedSignature)
+				require.NoError(t, err)
+
+				require.Equal(t, expectedSignature, s.Sig.Buffer)
+			} else {
+				s, err := sr.Signature.Signature.RSAPSS()
+				require.NoError(t, err)
+
+				err = rsa.VerifyPSS(&rsaPrivateKey.PublicKey, hh, digest, s.Sig.Buffer, &rsa.PSSOptions{
+					SaltLength: rsa.PSSSaltLengthAuto,
+				})
+				require.NoError(t, err)
+
+				err = rsa.VerifyPSS(&rsaPrivateKey.PublicKey, hh, digest, expectedSignature, &rsa.PSSOptions{
+					SaltLength: rsa.PSSSaltLengthAuto,
+				})
+				require.NoError(t, err)
+			}
 		})
 	}
 
