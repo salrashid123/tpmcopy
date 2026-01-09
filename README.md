@@ -9,6 +9,7 @@ The key you transfer will not get exposed into user space but can be used to sig
 Furthermore, you can place TPM based conditions on the transfer and the use of that key on the destination TPM
 
 For examples, you can specify a passphrase or certain `PCR` values must be present on use for the destination key.
+
 Alternativley, if you just want some secret to get transferred securely only to get decrypted in userspace (eg securely transfer raw data as opposed to a TPM-embedded key), see 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
@@ -25,6 +26,7 @@ Alternativley, if you just want some secret to get transferred securely only to 
   - [ECC](#ecc)
   - [AES](#aes)
   - [HMAC](#hmac)
+  - [KeyedHash](#keyedhash)  
 * [Usage Library](#usage-library)
 * [Key Policies](#key-policies)
   - [Skip Policy](#skippolicy)
@@ -101,7 +103,7 @@ Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Pr
 
 | Option | Description |
 |:------------|-------------|
-| **`-keyType`** | type of key to import/export (`rsa ecc aes hmac`) (default: "rsa") |
+| **`-keyType`** | type of key to import/export (`rsa ecc aes hmac keyedhash`) (default: "rsa") |
 | **`-rsaScheme`** | rsa Key Scheme (`rsassa rsapss`) (default: "rsassa") |
 | **`-hashScheme`** | hash Scheme (`sha256 sha384 sha512`) (default: "sha256") |
 | **`-eccScheme`** | ecc Key Alg (`ecc256 ecc384 ecc521`) (default: "ecc256") |
@@ -291,6 +293,43 @@ tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmke
 ### test
 cd example/
 go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMB
+```
+
+### KeyedHash
+
+To transfer an arbitrary secret to unseal remotely (eg a`KeyedHash`) run the following. 
+
+In other words, The secret you seal is unsealed into userspace on the remote system.
+
+Note that if all you want to do is to transfer a secret, you can also use the standalone tool here which specificly only coverst this:
+
+* [go-tpm-wrapping:  AEAD encryption using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
+
+anyway,
+
+```bash
+### Local
+echo -n "mysecretdata" > /tmp/keyed_hash.key
+
+### TPM-B
+export TPMB="/dev/tpmrm0"
+
+tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
+###  copy public.pem to Local
+
+### loal
+tpmcopy --mode duplicate --keyType=keyedhash --secret=/tmp/keyed_hash.key \
+   --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
+
+###  copy /tmp/out.json to TPM-B
+
+### TPM-B
+tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
+
+### test
+cd example/
+go run keyedhash/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMB
+# prints "mysecretdata"
 ```
 
 ---
@@ -1103,6 +1142,16 @@ cd example/
 go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
 cd ..
 
+### KeyedHash
+# echo -n "change this password to a secret" > /tmp/seal.key
+tpmcopy --mode duplicate --keyType=keyedhash --secret=/tmp/seal.key \
+   --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
+
+tpmcopy --mode import  --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmkey.pem   --tpm-path=$TPMB
+
+cd example/
+go run keyedhash/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
+cd ..
 
 ### Python RSA
 tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB

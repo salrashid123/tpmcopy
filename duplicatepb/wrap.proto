@@ -24,7 +24,8 @@ message Secret {
     ECC = 0;
     RSA = 1;
     HMAC = 2;
-    AES = 3;        
+    AES = 3;
+    KEYEDHASH = 4;        
   }
   ParentKeyType parentKeyType = 4;
   enum ParentKeyType {

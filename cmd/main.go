@@ -37,7 +37,7 @@ var (
 
 	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
 
-	keyType          = flag.String("keyType", "", "type of key to duplicate rsa|ecc|aes|hmac|seal")
+	keyType          = flag.String("keyType", "", "type of key to duplicate rsa|ecc|aes|hmac|keyedhash")
 	keyName          = flag.String("keyName", "", "User defined description of the key to export")
 	tpmPublicKeyFile = flag.String("tpmPublicKeyFile", "/tmp/public.pem", "File to write the public key to (default /tmp/public.pem)")
 
@@ -545,7 +545,62 @@ func run() int {
 					Buffer: []byte(*password), // set any userAuth
 				}
 			}
+		case "keyedhash":
 
+			keySensitive := f
+			hh, err := hsh.Hash()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error converting hash: %v", err)
+				return 1
+			}
+
+			// hmac is bound by the block size (openssl wraps larger keys to fit in)
+			if len(keySensitive) > hh.New().BlockSize() {
+				fmt.Fprintf(os.Stderr, "error max hmac key size is %d bytes", sha256.BlockSize)
+				return 1
+			}
+
+			sv := make([]byte, 32)
+			io.ReadFull(rand.Reader, sv)
+			privHash := crypto.SHA256.New()
+			privHash.Write(sv)
+			privHash.Write(keySensitive)
+			kt = duplicatepb.Secret_KEYEDHASH
+
+			dupKeyTemplate = tpm2.TPMTPublic{
+				Type:    tpm2.TPMAlgKeyedHash,
+				NameAlg: tpm2.TPMAlgSHA256,
+				ObjectAttributes: tpm2.TPMAObject{
+					FixedTPM:            false,
+					FixedParent:         false,
+					SensitiveDataOrigin: false,
+					UserWithAuth:        *skipPolicy,
+				},
+				AuthPolicy: tpm2.TPM2BDigest{},
+				Unique: tpm2.NewTPMUPublicID(
+					tpm2.TPMAlgKeyedHash,
+					&tpm2.TPM2BDigest{
+						Buffer: privHash.Sum(nil),
+					},
+				),
+			}
+
+			sens2B = tpm2.TPMTSensitive{
+				SensitiveType: tpm2.TPMAlgKeyedHash,
+				SeedValue: tpm2.TPM2BDigest{
+					Buffer: sv,
+				},
+				Sensitive: tpm2.NewTPMUSensitiveComposite(
+					tpm2.TPMAlgKeyedHash,
+					&tpm2.TPM2BSensitiveData{Buffer: keySensitive},
+				),
+			}
+
+			if *password != "" {
+				sens2B.AuthValue = tpm2.TPM2BAuth{
+					Buffer: []byte(*password), // set any userAuth
+				}
+			}
 		default:
 			fmt.Fprintf(os.Stderr, " unknown --keyType please specify rsa|ecc|aes|hmac\n")
 			return 1
