@@ -13,7 +13,7 @@ For examples, you can specify a passphrase or certain `PCR` values must be prese
 Alternativley, if you just want some secret to get transferred securely only to get decrypted in userspace (eg securely transfer raw data as opposed to a TPM-embedded key), see 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
-
+* [TPM Seal/Unseal with Policy](https://github.com/salrashid123/tpmseal)
 
 ---
 
