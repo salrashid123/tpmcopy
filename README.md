@@ -80,8 +80,6 @@ For more details, see the section below on [Bound Key Policy](#bound-key-policy)
 
 You can skip binding to the policies using the `--skipPolicy` flag
 
-Furthermore, the `TPM-B` parent must be the Endorsement ECC/RSA key or the H2 Primary from Storage.  No other parent types are currently supported.  A TODO: maybe to supply the `name` of any parent directly to the local system vs deriving it from the public key for known types.
-
 ---
 
 ### Options
