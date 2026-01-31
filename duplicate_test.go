@@ -39,10 +39,10 @@ const (
 	swTPMPath = "127.0.0.1:2321"
 )
 
-func getPublicKey(t *testing.T, tpmpublic tpm2.TPMTPublic, rwr transport.TPM) ([]byte, tpm2.TPMHandle, tpm2.TPMTPublic, error) {
+func getPublicKey(t *testing.T, hierarchy tpm2.TPMHandle, tpmpublic tpm2.TPMTPublic, rwr transport.TPM) ([]byte, tpm2.TPMHandle, tpm2.TPMTPublic, error) {
 
 	createEKB, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
+		PrimaryHandle: hierarchy,
 		InPublic:      tpm2.New2B(tpmpublic),
 	}.Execute(rwr)
 	if err != nil {
@@ -124,7 +124,12 @@ func getPublicKey(t *testing.T, tpmpublic tpm2.TPMTPublic, rwr transport.TPM) ([
 	case *rsa.PublicKey:
 		rsaPub, ok := parsedKey.(*rsa.PublicKey)
 		require.True(t, ok)
-		ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+		if hierarchy == tpm2.TPMRHOwner {
+			ekPububFromPEMTemplate = tpm2.RSASRKTemplate
+
+		} else {
+			ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+		}
 		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
 			tpm2.TPMAlgRSA,
 			&tpm2.TPM2BPublicKeyRSA{
@@ -134,7 +139,14 @@ func getPublicKey(t *testing.T, tpmpublic tpm2.TPMTPublic, rwr transport.TPM) ([
 	case *ecdsa.PublicKey:
 		ecPub, ok := parsedKey.(*ecdsa.PublicKey)
 		require.True(t, ok)
-		ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+
+		if hierarchy == tpm2.TPMRHOwner {
+			ekPububFromPEMTemplate = tpm2.ECCSRKTemplate
+
+		} else {
+			ekPububFromPEMTemplate = tpm2.ECCEKTemplate
+		}
+
 		ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
 			tpm2.TPMAlgECC,
 			&tpm2.TPMSECCPoint{
@@ -330,7 +342,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// ***** first get the ekpubB
 
-			_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -470,7 +482,7 @@ func TestDuplicatePasswordRSA(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -639,7 +651,7 @@ func TestDuplicateNoPolicyRSA(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// ***** first get the ekpubB
 
-			_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -756,7 +768,7 @@ func TestDuplicateNoPolicyRSA(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -893,7 +905,7 @@ func TestImportPersistent(t *testing.T) {
 
 	// ***** first get the ekpubB
 
-	_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1028,7 +1040,7 @@ func TestImportPersistent(t *testing.T) {
 
 	// now load the key
 
-	_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1166,7 +1178,7 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 
 			// ***** first get the ekpubB
 
-			ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 
 			require.NoError(t, err)
 
@@ -1304,7 +1316,7 @@ func TestDuplicatePasswordPCR(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -1450,7 +1462,7 @@ func TestDuplicateECC(t *testing.T) {
 
 	password := "somepassword"
 
-	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1633,7 +1645,7 @@ func TestDuplicateECC(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -1775,7 +1787,7 @@ func TestDuplicateAES(t *testing.T) {
 	password := "somepassword"
 	// ***** first get the ekpubB
 
-	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -1922,7 +1934,7 @@ func TestDuplicateAES(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -2056,7 +2068,7 @@ func TestDuplicateHMAC(t *testing.T) {
 	password := "somepassword"
 	// ***** first get the ekpubB
 
-	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -2194,7 +2206,7 @@ func TestDuplicateHMAC(t *testing.T) {
 
 			// now load the key
 
-			_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 			require.NoError(t, err)
 
 			defer func() {
@@ -2594,7 +2606,7 @@ func TestDuplicateKeyedHash(t *testing.T) {
 	password := "somepassword"
 	// ***** first get the ekpubB
 
-	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	ekpubPEM, ekHandle, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -2708,7 +2720,7 @@ func TestDuplicateKeyedHash(t *testing.T) {
 
 	// now load the key
 
-	_, ekHandleB, _, err := getPublicKey(t, tpm2.RSAEKTemplate, rwrB)
+	_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHEndorsement, tpm2.RSAEKTemplate, rwrB)
 	require.NoError(t, err)
 
 	defer func() {
@@ -2772,5 +2784,314 @@ func TestDuplicateKeyedHash(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, unseaResp.OutData.Buffer, kbytes)
+
+}
+
+func TestRSASRK(t *testing.T) {
+
+	tpmDeviceB, err := net.Dial("tcp", swTPMPath)
+	require.NoError(t, err)
+	defer tpmDeviceB.Close()
+
+	rwrB := transport.FromReadWriter(tpmDeviceB)
+	defer tpmDeviceB.Close()
+
+	tests := []struct {
+		name     string
+		password string
+
+		hsh     tpm2.TPMAlgID
+		alg     string
+		keyFile string
+	}{
+		{"SHA256RSASSA", "bar", tpm2.TPMAlgSHA256, "rsassa", "testdata/certs/key_rsa_2048.pem"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// ***** first get the ekpubB
+
+			_, ekHandle, ekPububFromPEMTemplate, err := getPublicKey(t, tpm2.TPMRHOwner, tpm2.RSASRKTemplate, rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: ekHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			/// now read the RSA private key to import/export
+
+			kbytes, err := os.ReadFile(tc.keyFile)
+			require.NoError(t, err)
+
+			block, _ := pem.Decode(kbytes)
+			require.NoError(t, err)
+
+			// Parse the PKCS#1 private key
+			privateKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			require.NoError(t, err)
+
+			rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
+			require.True(t, ok)
+
+			stringToSign := "foo"
+
+			b := []byte(stringToSign)
+
+			hh, err := tc.hsh.Hash()
+			require.NoError(t, err)
+
+			h := hh.New()
+			h.Write(b)
+			digest := h.Sum(nil)
+
+			var expectedSignature []byte
+
+			if tc.alg == "rsassa" {
+				expectedSignature, err = rsa.SignPKCS1v15(rand.Reader, rsaPrivateKey, hh, digest)
+				require.NoError(t, err)
+			} else {
+				expectedSignature, err = rsa.SignPSS(rand.Reader, rsaPrivateKey, hh, digest, &rsa.PSSOptions{
+					SaltLength: rsa.PSSSaltLengthAuto,
+				})
+				require.NoError(t, err)
+			}
+
+			var sch tpm2.TPMTRSAScheme
+			switch tc.alg {
+			case "rsassa":
+				sch = tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSASSA,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSASSA,
+						&tpm2.TPMSSigSchemeRSASSA{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			case "rsapss":
+				sch = tpm2.TPMTRSAScheme{
+					Scheme: tpm2.TPMAlgRSAPSS,
+					Details: tpm2.NewTPMUAsymScheme(
+						tpm2.TPMAlgRSAPSS,
+						&tpm2.TPMSSigSchemeRSAPSS{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			}
+
+			flushContextCmd := tpm2.FlushContext{
+				FlushHandle: ekHandle,
+			}
+			_, _ = flushContextCmd.Execute(rwrB)
+
+			dupKeyTemplate := tpm2.TPMTPublic{
+				Type:    tpm2.TPMAlgRSA,
+				NameAlg: tpm2.TPMAlgSHA256,
+				ObjectAttributes: tpm2.TPMAObject{
+					SignEncrypt:         true,
+					FixedTPM:            false,
+					FixedParent:         false,
+					SensitiveDataOrigin: false,
+					UserWithAuth:        true,
+				},
+
+				Parameters: tpm2.NewTPMUPublicParms(
+					tpm2.TPMAlgRSA,
+					&tpm2.TPMSRSAParms{
+						Exponent: uint32(rsaPrivateKey.PublicKey.E),
+						Scheme:   sch,
+						KeyBits:  tpm2.TPMIRSAKeyBits(rsaPrivateKey.N.BitLen()), //2048,
+					},
+				),
+
+				Unique: tpm2.NewTPMUPublicID(
+					tpm2.TPMAlgRSA,
+					&tpm2.TPM2BPublicKeyRSA{
+						Buffer: rsaPrivateKey.PublicKey.N.Bytes(),
+					},
+				),
+			}
+
+			sens2B := tpm2.TPMTSensitive{
+				SensitiveType: tpm2.TPMAlgRSA,
+				AuthValue: tpm2.TPM2BAuth{
+					Buffer: []byte(tc.password), // set any userAuth
+				},
+				Sensitive: tpm2.NewTPMUSensitiveComposite(
+					tpm2.TPMAlgRSA,
+					&tpm2.TPM2BPrivateKeyRSA{Buffer: rsaPrivateKey.Primes[0].Bytes()},
+				),
+			}
+
+			s, err := Duplicate(ekPububFromPEMTemplate, duplicatepb.Secret_RSA, duplicatepb.Secret_RSASRK, "", dupKeyTemplate, sens2B, nil, false)
+			require.NoError(t, err)
+
+			/// now import
+
+			srk, err := tpm2.CreatePrimary{
+				PrimaryHandle: tpm2.TPMRHOwner,
+				InPublic:      tpm2.New2B(tpm2.RSASRKTemplate),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+			defer func() {
+				_, _ = tpm2.FlushContext{
+					FlushHandle: srk.ObjectHandle,
+				}.Execute(rwrB)
+			}()
+
+			sessionEncryptionRspB, err := tpm2.CreatePrimary{
+				PrimaryHandle: tpm2.TPMRHOwner,
+				InPublic:      tpm2.New2B(tpm2.RSASRKTemplate),
+			}.Execute(rwrB)
+			require.NoError(t, err)
+			defer func() {
+				_, _ = tpm2.FlushContext{
+					FlushHandle: sessionEncryptionRspB.ObjectHandle,
+				}.Execute(rwrB)
+			}()
+
+			key, err := Import(&TPMConfig{
+				TPMDevice:               tpmDeviceB,
+				SessionEncryptionHandle: sessionEncryptionRspB.ObjectHandle,
+			}, srk.ObjectHandle, s)
+			require.NoError(t, err)
+
+			_, _ = tpm2.FlushContext{
+				FlushHandle: sessionEncryptionRspB.ObjectHandle,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			// now load the key
+
+			_, ekHandleB, _, err := getPublicKey(t, tpm2.TPMRHOwner, tpm2.RSASRKTemplate, rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: ekHandleB,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			pubEKB, err := tpm2.ReadPublic{
+				ObjectHandle: ekHandleB,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			regenRSAKey, err := tpm2.Load{
+				ParentHandle: tpm2.NamedHandle{
+					Handle: ekHandleB,
+					Name:   pubEKB.Name,
+					//	Auth:   load_session,
+				},
+				InPublic:  key.Pubkey,
+				InPrivate: key.Privkey,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			defer func() {
+				flushContextCmd := tpm2.FlushContext{
+					FlushHandle: regenRSAKey.ObjectHandle,
+				}
+				_, _ = flushContextCmd.Execute(rwrB)
+			}()
+
+			pubregen, err := tpm2.ReadPublic{
+				ObjectHandle: regenRSAKey.ObjectHandle,
+			}.Execute(rwrB)
+			require.NoError(t, err)
+
+			outPubBregen, err := pubregen.OutPublic.Contents()
+			require.NoError(t, err)
+
+			rsaDetailBregen, err := outPubBregen.Parameters.RSADetail()
+			require.NoError(t, err)
+
+			rsaUniqueBregen, err := outPubBregen.Unique.RSA()
+			require.NoError(t, err)
+
+			rsaPubBregen, err := tpm2.RSAPub(rsaDetailBregen, rsaUniqueBregen)
+			require.NoError(t, err)
+
+			require.Equal(t, rsaPubBregen, &rsaPrivateKey.PublicKey)
+
+			svc, err := NewPolicyAuthValueAndDuplicateSelectSession(rwrB, []byte(tc.password), pubEKB.Name, ekHandle)
+			require.NoError(t, err)
+			or_sess, or_sess_cleanup, err := svc.GetSession()
+			require.NoError(t, err)
+			defer or_sess_cleanup()
+
+			var sigsch tpm2.TPMTSigScheme
+			switch tc.alg {
+			case "rsassa":
+				sigsch = tpm2.TPMTSigScheme{
+					Scheme: tpm2.TPMAlgRSASSA,
+					Details: tpm2.NewTPMUSigScheme(
+						tpm2.TPMAlgRSASSA,
+						&tpm2.TPMSSchemeHash{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			case "rsapss":
+				sigsch = tpm2.TPMTSigScheme{
+					Scheme: tpm2.TPMAlgRSAPSS,
+					Details: tpm2.NewTPMUSigScheme(
+						tpm2.TPMAlgRSAPSS,
+						&tpm2.TPMSSchemeHash{
+							HashAlg: tc.hsh,
+						},
+					),
+				}
+			}
+
+			sign := tpm2.Sign{
+				KeyHandle: tpm2.AuthHandle{
+					Handle: regenRSAKey.ObjectHandle,
+					Name:   regenRSAKey.Name,
+					Auth:   or_sess, //tpm2.PasswordAuth([]byte(tc.password)),
+				},
+				Digest: tpm2.TPM2BDigest{
+					Buffer: digest[:],
+				},
+				InScheme: sigsch,
+				Validation: tpm2.TPMTTKHashCheck{
+					Tag: tpm2.TPMSTHashCheck,
+				},
+			}
+
+			sr, err := sign.Execute(rwrB)
+			require.NoError(t, err)
+
+			if tc.alg == "rsassa" {
+				s, err := sr.Signature.Signature.RSASSA()
+				require.NoError(t, err)
+
+				err = rsa.VerifyPKCS1v15(&rsaPrivateKey.PublicKey, hh, digest, s.Sig.Buffer)
+				require.NoError(t, err)
+
+				err = rsa.VerifyPKCS1v15(&rsaPrivateKey.PublicKey, hh, digest, expectedSignature)
+				require.NoError(t, err)
+
+				require.Equal(t, expectedSignature, s.Sig.Buffer)
+			} else {
+				s, err := sr.Signature.Signature.RSAPSS()
+				require.NoError(t, err)
+
+				err = rsa.VerifyPSS(&rsaPrivateKey.PublicKey, hh, digest, s.Sig.Buffer, &rsa.PSSOptions{
+					SaltLength: rsa.PSSSaltLengthAuto,
+				})
+				require.NoError(t, err)
+
+				err = rsa.VerifyPSS(&rsaPrivateKey.PublicKey, hh, digest, expectedSignature, &rsa.PSSOptions{
+					SaltLength: rsa.PSSSaltLengthAuto,
+				})
+				require.NoError(t, err)
+			}
+		})
+	}
 
 }

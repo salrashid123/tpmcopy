@@ -31,7 +31,9 @@ message Secret {
   enum ParentKeyType {
     EndoresementECC = 0;
     EndorsementRSA = 1;
-    H2 = 2;    
+    H2 = 2;
+    ECCSRK = 3;
+    RSASRK = 4;        
   }  
   repeated PCRS pcrs = 5;  
   string key = 6;

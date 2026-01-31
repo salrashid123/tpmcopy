@@ -35,7 +35,7 @@ var (
 	mode       = flag.String("mode", "", "publickey | duplicate | import | evict")
 	skipPolicy = flag.Bool("skipPolicy", false, "Skip binding the duplicated key to any policy")
 
-	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2 (default rsa_ek)")
+	parentKeyType = flag.String("parentKeyType", "rsa_ek", "rsa_ek|ecc_ek|h2|rsa_srk|ecc_srk (default rsa_ek)")
 
 	keyType          = flag.String("keyType", "", "type of key to duplicate rsa|ecc|aes|hmac|keyedhash")
 	keyName          = flag.String("keyName", "", "User defined description of the key to export")
@@ -118,8 +118,14 @@ func run() int {
 				fmt.Fprintf(os.Stderr, "  error converting encryptingPublicKey to rsa")
 				return 1
 			}
-			ekPububFromPEMTemplate = tpm2.RSAEKTemplate
-			pkt = duplicatepb.Secret_EndorsementRSA
+			if *parentKeyType == tpmcopy.RSA_SRK {
+				ekPububFromPEMTemplate = tpm2.RSASRKTemplate
+				pkt = duplicatepb.Secret_RSASRK
+
+			} else {
+				ekPububFromPEMTemplate = tpm2.RSAEKTemplate
+				pkt = duplicatepb.Secret_EndorsementRSA
+			}
 			ekPububFromPEMTemplate.Unique = tpm2.NewTPMUPublicID(
 				tpm2.TPMAlgRSA,
 				&tpm2.TPM2BPublicKeyRSA{
@@ -133,10 +139,14 @@ func run() int {
 				return 1
 			}
 
-			if *parentKeyType == tpmcopy.H2 {
+			switch *parentKeyType {
+			case tpmcopy.H2:
 				ekPububFromPEMTemplate = keyfile.ECCSRK_H2_Template
 				pkt = duplicatepb.Secret_H2
-			} else {
+			case tpmcopy.RSA_SRK:
+				ekPububFromPEMTemplate = tpm2.ECCSRKTemplate
+				pkt = duplicatepb.Secret_ECCSRK
+			default:
 				ekPububFromPEMTemplate = tpm2.ECCEKTemplate
 				pkt = duplicatepb.Secret_EndoresementECC
 			}
@@ -688,6 +698,12 @@ func run() int {
 		case tpmcopy.H2:
 			t = keyfile.ECCSRK_H2_Template
 			primaryHandle = tpm2.TPMRHOwner
+		case tpmcopy.RSA_SRK:
+			t = tpm2.RSASRKTemplate
+			primaryHandle = tpm2.TPMRHOwner
+		case tpmcopy.ECC_SRK:
+			t = tpm2.ECCSRKTemplate
+			primaryHandle = tpm2.TPMRHOwner
 		default:
 			fmt.Fprintf(os.Stderr, "unsupported --keyType must be either rsa or ecc, got %v\n", *keyType)
 			return 1
@@ -762,6 +778,10 @@ func run() int {
 			t = tpm2.ECCEKTemplate
 		} else if *parentKeyType == tpmcopy.H2 && k.ParentKeyType == duplicatepb.Secret_H2 {
 			t = keyfile.ECCSRK_H2_Template
+		} else if *parentKeyType == tpmcopy.RSA_SRK && k.ParentKeyType == duplicatepb.Secret_RSASRK {
+			t = tpm2.RSASRKTemplate
+		} else if *parentKeyType == tpmcopy.ECC_SRK && k.ParentKeyType == duplicatepb.Secret_ECCSRK {
+			t = tpm2.ECCEKTemplate
 		} else {
 			fmt.Fprintf(os.Stderr, "  keytype in file [%s] mismatched with command line: [%s]", k.ParentKeyType, *parentKeyType)
 			return 1
@@ -769,9 +789,12 @@ func run() int {
 
 		var primaryParent tpm2.TPMHandle
 
-		if k.ParentKeyType == duplicatepb.Secret_H2 {
+		switch k.ParentKeyType {
+		case duplicatepb.Secret_H2:
 			primaryParent = tpm2.TPMRHOwner
-		} else {
+		case duplicatepb.Secret_RSASRK, duplicatepb.Secret_ECCSRK:
+			primaryParent = tpm2.TPMRHOwner
+		default:
 			primaryParent = tpm2.TPMRHEndorsement
 		}
 

@@ -134,7 +134,7 @@ func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secre
 		return duplicatepb.Secret{}, fmt.Errorf(" failed to get name from ekPububFromPEMTemplate: %v", err)
 	}
 
-	if parentKeyType == duplicatepb.Secret_EndorsementRSA {
+	if parentKeyType == duplicatepb.Secret_EndorsementRSA || parentKeyType == duplicatepb.Secret_RSASRK {
 		rsaDetailB, err := ekPububFromPEMTemplate.Parameters.RSADetail()
 		if err != nil {
 			return duplicatepb.Secret{}, fmt.Errorf(" error getting RSADetail %v ", err)
@@ -366,7 +366,7 @@ func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secre
 	}
 
 	switch parentKeyType {
-	case duplicatepb.Secret_EndorsementRSA:
+	case duplicatepb.Secret_EndorsementRSA, duplicatepb.Secret_RSASRK:
 		//  start createRSASeed
 		seedSize := *aeskeybits / 8
 		seed = make([]byte, seedSize)
@@ -389,7 +389,7 @@ func Duplicate(ekPububFromPEMTemplate tpm2.TPMTPublic, keyType duplicatepb.Secre
 			return duplicatepb.Secret{}, fmt.Errorf("error packing encryptedseed: %v", err)
 		}
 
-	case duplicatepb.Secret_EndoresementECC, duplicatepb.Secret_H2:
+	case duplicatepb.Secret_EndoresementECC, duplicatepb.Secret_H2, duplicatepb.Secret_ECCSRK:
 
 		ecp, err := ecdsa.GenerateKey(ekeccPub.Curve, rand.Reader)
 		if err != nil {
@@ -572,7 +572,7 @@ func Import(h *TPMConfig, parentHandle tpm2.TPMHandle, secret duplicatepb.Secret
 	var importResp *tpm2.ImportResponse
 	var importCmd tpm2.Import
 
-	if secret.ParentKeyType == duplicatepb.Secret_H2 {
+	if secret.ParentKeyType == duplicatepb.Secret_H2 || secret.ParentKeyType == duplicatepb.Secret_RSASRK || secret.ParentKeyType == duplicatepb.Secret_ECCSRK {
 
 		h2Pub, err := tpm2.ReadPublic{
 			ObjectHandle: tpm2.TPMIDHObject(parentHandle),

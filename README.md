@@ -13,7 +13,7 @@ For examples, you can specify a passphrase or certain `PCR` values must be prese
 Alternativley, if you just want some secret to get transferred securely only to get decrypted in userspace (eg securely transfer raw data as opposed to a TPM-embedded key), see 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
-* [TPM Seal/Unseal with Policy](https://github.com/salrashid123/tpmseal)
+
 
 ---
 
@@ -36,6 +36,7 @@ Alternativley, if you just want some secret to get transferred securely only to 
 * [Key Parent](#key-parent)
   - [Using EK Parent](#using-ek-parent)
   - [Using H2 Parent](#using-h2-parent)
+  - [Using SRK Parent](#using-srk-parent)  
 * [TPM2_TOOLS Compatibility](#tpm2_tools-compatibility)
 * [Parent Persistent Handle](#parent-persistent-handle)
 * [Key persistent handle](#key-persistent-handle)
@@ -54,7 +55,7 @@ At a high level, this utility basically performs [tpm2_duplicate](https://github
 
 If you want to transfer an external `RSA|ECC|AES|HMAC` key _from_  a `local` system  to `TPM-B`, you will need to
 
-1. On `TPM-B`, extract the [Endorsement Public Key](https://trustedcomputinggroup.org/wp-content/uploads/EK-Credential-Profile-For-TPM-Family-2.0-Level-0-V2.5-R1.0_28March2022.pdf) or the [H2 ECC SRK](https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-parent)
+1. On `TPM-B`, extract the [Endorsement Public Key](https://trustedcomputinggroup.org/wp-content/uploads/EK-Credential-Profile-For-TPM-Family-2.0-Level-0-V2.5-R1.0_28March2022.pdf), the [H2 ECC SRK](https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-parent) or the RSA|ECC Storage Root Key (`SRK`)
    Copy the public key to the system from which you want to transfer the secret key (eg, local)
 
 2. On `local`, create the secret `RSA|ECC|AES|HMAC`
@@ -180,6 +181,13 @@ tpm2_createprimary -C o -G ecc  -g sha256 \
      -c primary.ctx \
      -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -u unique.dat
 tpm2_readpublic -c primary.ctx -o h2Public.pem -f PEM -n primary.name 
+```
+
+If you want the RSA or ECC Storage Root Key (SRK)
+
+```bash
+tpm2_createprimary -C o -G rsa  -g sha256  -c primary.ctx
+tpm2_readpublic -c primary.ctx -o rsa_srk.pem -f PEM
 ```
 
 ### RSA
@@ -610,6 +618,52 @@ go run rsa/persistent_h2_parent/main.go --pemFile=/tmp/tpmkey.pem \
    --password=bar  --tpm-path=$TPMB
 ```
 
+### Using SRK Parent
+
+If you want to use the storage root key as the parent, see
+
+```bash
+### RSA_SRK
+printf '\x00\x01' > ud.1
+dd if=/dev/zero bs=256 count=1 of=ud.2
+cat ud.1 ud.2 > unique.dat
+
+tpm2_createprimary -C o  -u unique.dat \
+   -G rsa2048  -g sha256  -c primary.ctx --attributes="fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -Q
+tpm2_readpublic -c primary.ctx -o rsa_srk.pem -f PEM
+tpm2_flushcontext -t
+
+## or
+go run cmd/main.go --mode publickey --parentKeyType=rsa_srk -tpmPublicKeyFile=/tmp/rsa_srk.pem --tpm-path=$TPMB
+
+# echo -n "46be0927a4f86577f17ce6d10bc6aa61" > /tmp/aes.key
+go run cmd/main.go --mode duplicate --parentKeyType=rsa_srk --keyType=aes --aesScheme=cfb --keySize=128 --secret=/tmp/aes.key \
+   --password=bar -tpmPublicKeyFile=/tmp/rsa_srk.pem -out=/tmp/out.json
+
+###  copy /tmp/out.json to TPM-B
+### TPM-B
+go run cmd/main.go --mode import --parentKeyType=rsa_srk --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
+
+### test
+cd example/
+go run aes/srk/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
+```
+
+Alternatively, if you want to `SkipPolicy`
+
+```bash
+go run cmd/main.go --mode duplicate --parentKeyType=rsa_srk --skipPolicy --keyType=aes --aesScheme=cfb --keySize=128 --secret=/tmp/aes.key \
+   --password=bar -tpmPublicKeyFile=/tmp/rsa_srk.pem -out=/tmp/out.json
+
+###  copy /tmp/out.json to TPM-B
+### TPM-B
+go run cmd/main.go --mode import --parentKeyType=rsa_srk --in=/tmp/out.json --out=/tmp/tpmkey.pem  --tpm-path=$TPMB
+
+### test
+cd example/
+go run aes/skipPolicy/main.go --pemFile=/tmp/tpmkey.pem  --password=bar --tpm-path=$TPMB
+```
+
 ## TPM2_TOOLS compatibility
 
 If you wanted to use `tpm2_tools` on the key imported to `TPM-B`, then use the `--pubout=` and `--privout=` parameters when importing.
@@ -876,13 +930,16 @@ message Secret {
     ECC = 0;
     RSA = 1;
     HMAC = 2;
-    AES = 3;        
+    AES = 3;
+    KEYEDHASH = 4;        
   }
   ParentKeyType parentKeyType = 4;
   enum ParentKeyType {
     EndoresementECC = 0;
     EndorsementRSA = 1;
-    H2 = 2;    
+    H2 = 2;
+    OwnerECC = 3;
+    OwnerRSA = 4;        
   }  
   repeated PCRS pcrs = 5;  
   string key = 6;

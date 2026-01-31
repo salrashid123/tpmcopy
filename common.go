@@ -32,9 +32,11 @@ const (
 	defaultParentPersistentHandle = uint32(0x81008000)
 	defaultKeyPersistentHandle    = uint32(0x81008001)
 
-	RSA_EK = "rsa_ek"
-	ECC_EK = "ecc_ek"
-	H2     = "h2"
+	RSA_EK  = "rsa_ek"
+	ECC_EK  = "ecc_ek"
+	H2      = "h2"
+	RSA_SRK = "rsa_srk"
+	ECC_SRK = "ecc_srk"
 )
 
 func getPCRMap(algo tpm2.TPMAlgID, pcrMap map[uint][]byte) (map[uint][]byte, []uint, []byte, error) {
