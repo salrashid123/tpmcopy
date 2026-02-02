@@ -184,8 +184,15 @@ tpm2_readpublic -c primary.ctx -o h2Public.pem -f PEM -n primary.name
 If you want the RSA or ECC Storage Root Key (SRK)
 
 ```bash
-tpm2_createprimary -C o -G rsa  -g sha256  -c primary.ctx
+## RSASRK 
+printf '\x00\x01' > ud.1
+dd if=/dev/zero bs=256 count=1 of=ud.2
+cat ud.1 ud.2 > unique.dat
+
+tpm2_createprimary -C o  -u unique.dat \
+   -G rsa2048  -g sha256  -c primary.ctx --attributes="fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -Q
 tpm2_readpublic -c primary.ctx -o rsa_srk.pem -f PEM
+tpm2_flushcontext -t
 ```
 
 ### RSA
@@ -622,6 +629,10 @@ If you want to use the storage root key as the parent, see
 
 ```bash
 ### RSA_SRK
+#### see go-tpm.tpm2.RSASRKTemplate   https://github.com/google/go-tpm/blob/main/tpm2/templates.go#L6
+#### pg 26:  https://trustedcomputinggroup.org/wp-content/uploads/TCG-TPM-v2.0-Provisioning-Guidance-Published-v1r1.pdf
+#### pg 43: B.3.3 Template L-1: RSA 2048 (Storage)   https://trustedcomputinggroup.org/wp-content/uploads/TCG-EK-Credential-Profile-for-TPM-Family-2.0-Level-0-Version-2.6_pub.pdf
+
 printf '\x00\x01' > ud.1
 dd if=/dev/zero bs=256 count=1 of=ud.2
 cat ud.1 ud.2 > unique.dat
@@ -630,6 +641,17 @@ tpm2_createprimary -C o  -u unique.dat \
    -G rsa2048  -g sha256  -c primary.ctx --attributes="fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -Q
 tpm2_readpublic -c primary.ctx -o rsa_srk.pem -f PEM
 tpm2_flushcontext -t
+
+### for ECCSRK it should be something like this but i can't get it to work
+# printf '\x20\x00' > ud.1
+# dd if=/dev/zero bs=32 count=1 status=none  of=ud.2
+## setup the x and y for ECCPoint
+# cat ud.1 ud.2 ud.1 ud.2 > unique.dat
+# tpm2_createprimary -C o -G ecc256 -g sha256 -c primary.ctx  -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -u unique.dat  
+# tpm2_readpublic -c primary.ctx -o ecc_srk.pem -f PEM -Q
+# tpm2_flushcontext -t
+# cat ecc_srk.pem 
+
 
 ## or
 go run cmd/main.go --mode publickey --parentKeyType=rsa_srk -tpmPublicKeyFile=/tmp/rsa_srk.pem --tpm-path=$TPMB
