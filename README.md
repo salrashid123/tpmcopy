@@ -642,16 +642,14 @@ tpm2_createprimary -C o  -u unique.dat \
 tpm2_readpublic -c primary.ctx -o rsa_srk.pem -f PEM
 tpm2_flushcontext -t
 
-### for ECCSRK it should be something like this but i can't get it to work
+### for ECC_SRK
 # printf '\x20\x00' > ud.1
-# dd if=/dev/zero bs=32 count=1 status=none  of=ud.2
-## setup the x and y for ECCPoint
+# dd if=/dev/zero bs=128 count=1  of=ud.2
 # cat ud.1 ud.2 ud.1 ud.2 > unique.dat
-# tpm2_createprimary -C o -G ecc256 -g sha256 -c primary.ctx  -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -u unique.dat  
+# tpm2_createprimary -C o -G ecc256 -g sha256 -c primary.ctx  -a "fixedtpm|fixedparent|sensitivedataorigin|userwithauth|noda|restricted|decrypt" -u unique.dat 
 # tpm2_readpublic -c primary.ctx -o ecc_srk.pem -f PEM -Q
 # tpm2_flushcontext -t
 # cat ecc_srk.pem 
-
 
 ## or
 go run cmd/main.go --mode publickey --parentKeyType=rsa_srk -tpmPublicKeyFile=/tmp/rsa_srk.pem --tpm-path=$TPMB
