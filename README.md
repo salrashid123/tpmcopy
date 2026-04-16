@@ -14,6 +14,52 @@ Alternativley, if you just want some secret to get transferred securely only to 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
 
+---
+
+### QuickStart
+
+As an example, to transfer an RSA key (`key_rsa.pem`) from a `local` system to a remote system which has a TPM
+
+1. Get the remote systems TPM `Endorsement Public Key (ekPub)`
+
+   There are several ways to do this without using this tool but the following describes using `tpmcopy`
+
+   ```bash
+   tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=ek_public.pem --tpm-path=/dev/tpmrm0
+   ```
+
+2. Copy `ek_public.pem` key to `local`
+
+3. `Duplicate` the RSA key (`key_rsa.pem`) using `EkPub`
+
+   ```bash
+   tpmcopy --mode duplicate --keyType=rsa --secret=key_rsa.pem --rsaScheme=rsassa \
+       --hashScheme=sha256 --password=bar -tpmPublicKeyFile=ek_public.pem -out=out.json
+   ```
+
+4. `Import` the `duplicated` key inot the TPM
+
+   ```bash
+   tpmcopy --mode import --parentKeyType=rsa_ek --in=out.json --out=tpmkey.pem  --tpm-path=/dev/tpmrm0
+   ```
+
+After step 4, the duplicated is usable within the target TPM and is represented in PEM fomat:
+
+```bash
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAne5iFdkj4QETbjUnWcOl
++wQl6s9tBR2bSOp3gRUCn1noG7E62U5T3jCP9k0883rWeUh6fTICTzxhoPRIlm/R
+z0vFnKOm51VYAgT/XwhirLTqaskvS76B9OXGRt+9BVo0RkbzV8fhYzd2kGQPGdj5
+ncRSqF/wzLEnfdv5tZziPmdtHQXvlGdVOEIP3Zz2VPi36DP3IW5wnxohrTIB9R/o
+m+1jdG2CRn7rkv2ZRvBKP9umNttG3wFM4qn2Pn+mBZ9rfxPCeZULC/EMu2lvG/+q
+lBSUzXVDECes2SdamtwvA2o0Wnfw4SunIY2ehT+J8jq7c/4mMHus8amCBs1tgcDA
+bwIDAQAB
+-----END PUBLIC KEY-----
+```
+
+The  key representation above is not simply encrypted form of the original RSA key but encoded data which can only get interpreted by the TPM itself.
+
+At no time will the original key data become visible but the TPM can use the PEM key (`tpmkey.pem`) to perform operations
 
 ---
 
