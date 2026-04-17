@@ -33,6 +33,9 @@ As an example, to transfer an RSA key (`key_rsa.pem`) from a `local` system to a
 3. `Duplicate` the RSA key (`key_rsa.pem`) using `EkPub`
 
    ```bash
+   ## generate a key to transfer
+   openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -pkeyopt rsa_keygen_pubexp:65537 -out key_rsa.pem
+
    tpmcopy --mode duplicate --keyType=rsa --secret=key_rsa.pem --rsaScheme=rsassa \
        --hashScheme=sha256 --password=bar -tpmPublicKeyFile=ek_public.pem -out=out.json
    ```
@@ -40,10 +43,10 @@ As an example, to transfer an RSA key (`key_rsa.pem`) from a `local` system to a
 4. `Import` the `duplicated` key inot the TPM
 
    ```bash
-   tpmcopy --mode import --parentKeyType=rsa_ek --in=out.json --out=tpmkey.pem  --tpm-path=/dev/tpmrm0
+   tpmcopy --mode import --parentKeyType=rsa_ek --in=out.json --out=tpmkey.pem --pubout=pub.dat --privout=priv.dat --tpm-path=/dev/tpmrm0
    ```
 
-After step 4, the duplicated is usable within the target TPM and is represented in PEM fomat:
+After step 4, the duplicated is usable within the target TPM and is represented in PEM fomat and in a format `tpm2_tools` understands
 
 ```bash
 -----BEGIN PUBLIC KEY-----
@@ -55,6 +58,32 @@ m+1jdG2CRn7rkv2ZRvBKP9umNttG3wFM4qn2Pn+mBZ9rfxPCeZULC/EMu2lvG/+q
 lBSUzXVDECes2SdamtwvA2o0Wnfw4SunIY2ehT+J8jq7c/4mMHus8amCBs1tgcDA
 bwIDAQAB
 -----END PUBLIC KEY-----
+```
+
+You can use this key to perform TPM operations (in this case sign something).  The followin uses standard `tpm2_tools` to do that
+
+```bash
+tpm2_createek -c ek.ctx -G rsa -u ek.pub
+tpm2_readpublic -c ek.ctx -o ek.pem -f PEM -n ek.name
+
+tpm2 flushcontext -t
+tpm2 startauthsession --session session.ctx --policy-session
+tpm2 policysecret --session session.ctx --object-context endorsement
+tpm2_load -C ek.ctx -c key.ctx -u pub.dat -r priv.dat --auth session:session.ctx
+
+tpm2_startauthsession -S sessionA.dat --policy-session
+tpm2_policyduplicationselect -S sessionA.dat  -N ek.name -L policyA_dupselect.dat 
+tpm2_flushcontext sessionA.dat
+rm sessionA.dat
+
+tpm2_startauthsession -S sessionA.dat --policy-session
+tpm2_policyauthvalue -S sessionA.dat  -L policyA_auth.dat 
+echo -n foo > file.txt
+tpm2_policyor -S sessionA.dat -L policyA_or.dat sha256:policyA_auth.dat,policyA_dupselect.dat 
+tpm2_sign -c key.ctx -g sha256  -f plain  -p"session:sessionA.dat+bar"  -o sig.rss  file.txt
+
+### you can also use openssl but for that you need to create a key without policies attached;
+###  see the section "Openssl Compatiblity"  
 ```
 
 The  key representation above is not simply encrypted form of the original RSA key but encoded data which can only get interpreted by the TPM itself.
