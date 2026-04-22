@@ -8,9 +8,11 @@ The key you transfer will not get exposed into user space but can be used to sig
 
 Furthermore, you can place TPM based conditions on the transfer and the use of that key on the destination TPM
 
-For examples, you can specify a passphrase or certain `PCR` values must be present on use for the destination key.
+For example, you can specify a passphrase or certain `PCR` values must be present on use for the destination key.
 
-Alternativley, if you just want some secret to get transferred securely only to get decrypted in userspace (eg securely transfer raw data as opposed to a TPM-embedded key), see 
+Furthermore, the default policy used to copy the key will prevent further reduplication to _another_ TPM (see issue [tpm2-tools/issues/3391](https://github.com/tpm2-software/tpm2-tools/issues/3391))
+
+Note: if you just want some secret to get transferred securely only to get decrypted in userspace (eg securely transfer raw data as opposed to a TPM-embedded key), see 
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
 
