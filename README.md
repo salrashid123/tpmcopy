@@ -6,7 +6,7 @@ Basically, you can transfer a key from your laptop (`local`)  to `TPM-B` such th
 
 The key you transfer will not get exposed into user space but can be used to sign/encrypt/decrypt/hmac while always existing _inside_ the destination `TPM`.
 
-Furthermore, you can place TPM based conditions on the transfer and the use of that key on the destination TPM
+You can place TPM based conditions on the transfer and the use of that key on the destination TPM
 
 For example, you can specify a passphrase or certain `PCR` values must be present on use for the destination key.
 
