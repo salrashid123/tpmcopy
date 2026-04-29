@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package duplicatepb;
 
-option go_package = "github.com/salrashid123/go-tpm-wrapping/tpmwrappb";
+option go_package = "github.com/salrashid123/tpmcopy/duplicatepb";
 
 /*
 $ protoc --version

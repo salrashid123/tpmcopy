@@ -389,16 +389,16 @@ go run hmac/password/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path
 
 To transfer an arbitrary secret to unseal remotely (eg a`KeyedHash`) run the following. 
 
-In other words, The secret you seal is unsealed into userspace on the remote system.
+In other words, The secret you seal is unsealed into userspace on the remote system.  Its basically a way to remotely `seal/unseal` some data.
 
-Note that if all you want to do is to transfer a secret, you can also use the standalone tool here which specificly only coverst this:
+Note that if all you want to do is to transfer a secret, you can also use the standalone tool here:
 
 * [go-tpm-wrapping:  AEAD encryption using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
 
 anyway,
 
 ```bash
-### Local
+### Local:  encode some data to seal
 echo -n "mysecretdata" > /tmp/keyed_hash.key
 
 ### TPM-B
@@ -407,7 +407,7 @@ export TPMB="/dev/tpmrm0"
 tpmcopy --mode publickey --parentKeyType=rsa_ek -tpmPublicKeyFile=/tmp/public.pem --tpm-path=$TPMB
 ###  copy public.pem to Local
 
-### loal
+### local
 tpmcopy --mode duplicate --keyType=keyedhash --secret=/tmp/keyed_hash.key \
    --password=bar -tpmPublicKeyFile=/tmp/public.pem -out=/tmp/out.json
 
@@ -419,7 +419,8 @@ tpmcopy --mode import --parentKeyType=rsa_ek --in=/tmp/out.json --out=/tmp/tpmke
 ### test
 cd example/
 go run keyedhash/main.go --pemFile=/tmp/tpmkey.pem --password=bar --tpm-path=$TPMB
-# prints "mysecretdata"
+
+#### this will print the unsealed data: "mysecretdata"
 ```
 
 ---
@@ -1015,7 +1016,7 @@ syntax = "proto3";
 
 package duplicatepb;
 
-option go_package = "github.com/salrashid123/go-tpm-wrapping/tpmwrappb";
+option go_package = "github.com/salrashid123/tpmcopy/duplicatepb";
 
 message Secret {
   string name = 1;
