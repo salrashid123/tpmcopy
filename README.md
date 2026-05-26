@@ -16,6 +16,18 @@ Note: if you just want some secret to get transferred securely only to get decry
 
 * [Go-TPM-Wrapping - Go library and CLI utiity for encrypting data using Trusted Platform Module (TPM)](https://github.com/salrashid123/go-tpm-wrapping)
 
+Alternatively, if you want to securly _import_ an external key into a TPM:
+
+* [https://github.com/salrashid123/tpmimport](https://github.com/salrashid123/tpmimport)
+
+to seal/unseal, see
+
+* [https://github.com/salrashid123/tpmseal](https://github.com/salrashid123/tpmseal)
+
+to generate a new key on a TPM, see
+
+* [https://github.com/salrashid123/tpm2genkey](https://github.com/salrashid123/tpm2genkey)
+
 ---
 
 ### QuickStart
